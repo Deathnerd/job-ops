@@ -1,5 +1,8 @@
 import { TokenizedInput } from "@client/pages/orchestrator/TokenizedInput";
-import type { ResumeProjectCatalogItem } from "@shared/types.js";
+import type {
+  ResumeProjectCatalogItem,
+  ResumeProjectsSettings,
+} from "@shared/types.js";
 import {
   CheckCircle2,
   Circle,
@@ -39,6 +42,8 @@ interface TailoringSectionsProps {
   jobDescription: string;
   skillsDraft: EditableSkillGroup[];
   selectedIds: Set<string>;
+  resumeProjectsSettings?: ResumeProjectsSettings | null;
+  isResumeProjectsSettingsLoading?: boolean;
   tracerLinksEnabled: boolean;
   tracerEnableBlocked: boolean;
   tracerEnableBlockedReason: string | null;
@@ -84,6 +89,22 @@ type SectionState =
   | "optional"
   | "source"
   | "none";
+
+type NoSelectedProjectsReason =
+  | "projects-loading"
+  | "settings-loading"
+  | "no-projects"
+  | "no-project-slots"
+  | "no-available-slots"
+  | "no-ai-selectable-projects"
+  | "selection-empty"
+  | "unknown";
+
+type NoSelectedProjectsInfoCopy = {
+  reason: NoSelectedProjectsReason;
+  title: string;
+  description: string;
+};
 
 const sectionClass =
   "overflow-hidden rounded-md border border-border/55 bg-background/25 px-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]";
@@ -147,6 +168,98 @@ const skillGroupHasKeywords = (keywordsText: string) =>
 const skillGroupNeedsReview = (group: EditableSkillGroup) =>
   !textHasValue(group.name) || !skillGroupHasKeywords(group.keywordsText);
 
+export function getNoSelectedProjectsInfo(args: {
+  catalog: ResumeProjectCatalogItem[];
+  isCatalogLoading: boolean;
+  selectedIds: Set<string>;
+  resumeProjectsSettings?: ResumeProjectsSettings | null;
+  isResumeProjectsSettingsLoading?: boolean;
+}): NoSelectedProjectsInfoCopy | null {
+  if (args.selectedIds.size > 0) return null;
+
+  if (args.isCatalogLoading) {
+    return {
+      reason: "projects-loading",
+      title: "Projects are still loading",
+      description:
+        "Project options are still loading. Wait a moment before deciding whether this job has no selected projects.",
+    };
+  }
+
+  if (args.catalog.length === 0) {
+    return {
+      reason: "no-projects",
+      title: "No projects found",
+      description:
+        "No projects were found in your base resume. Add projects to your resume to include them here.",
+    };
+  }
+
+  if (args.isResumeProjectsSettingsLoading) {
+    return {
+      reason: "settings-loading",
+      title: "Project settings are still loading",
+      description:
+        "Project options are available, but selection settings are still loading. Wait a moment or select projects manually below.",
+    };
+  }
+
+  const settings = args.resumeProjectsSettings;
+  if (!settings) {
+    return {
+      reason: "unknown",
+      title: "No projects selected",
+      description:
+        "No projects are saved for this job yet. The generated PDF will not include tailored project choices until you select projects below or run automatic generation again.",
+    };
+  }
+
+  const catalogIds = new Set(args.catalog.map((project) => project.id));
+  const lockedProjectIds = settings.lockedProjectIds.filter((id) =>
+    catalogIds.has(id),
+  );
+  const lockedSet = new Set(lockedProjectIds);
+  const aiSelectableProjectIds = settings.aiSelectableProjectIds
+    .filter((id) => catalogIds.has(id))
+    .filter((id) => !lockedSet.has(id));
+  const maxProjects = Math.max(0, Math.floor(settings.maxProjects));
+  const availableSlots = Math.max(0, maxProjects - lockedProjectIds.length);
+
+  if (maxProjects === 0) {
+    return {
+      reason: "no-project-slots",
+      title: "No project slots available",
+      description:
+        "Project settings currently allow 0 projects. Increase the max project count or select projects manually before generating the PDF.",
+    };
+  }
+
+  if (availableSlots === 0) {
+    return {
+      reason: "no-available-slots",
+      title: "No AI selection slots available",
+      description:
+        "Your max project count is already filled by must-include projects, so automatic selection cannot add more projects. Select projects manually or adjust the max project count.",
+    };
+  }
+
+  if (aiSelectableProjectIds.length === 0) {
+    return {
+      reason: "no-ai-selectable-projects",
+      title: "No AI-selectable projects",
+      description:
+        "Your resume has projects, but none are available for automatic selection. Select projects manually here, or mark projects as AI-selectable in resume project settings.",
+    };
+  }
+
+  return {
+    reason: "selection-empty",
+    title: "No projects selected",
+    description:
+      "Automatic tailoring created the draft, but no projects were selected for this job. Choose the projects to include below before generating the PDF.",
+  };
+}
+
 const SectionTriggerLabel: React.FC<{
   title: string;
   state: SectionState;
@@ -185,22 +298,25 @@ const SectionTriggerLabel: React.FC<{
   );
 };
 
-const NoSelectedProjectsInfo = () => (
+const NoSelectedProjectsInfo = ({
+  info,
+}: {
+  info: NoSelectedProjectsInfoCopy;
+}) => (
   <Tooltip>
     <TooltipTrigger asChild>
       <span
-        aria-label="Why no projects are selected"
+        aria-label={info.title}
         className="inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:bg-muted/40 hover:text-foreground"
         role="img"
-        title="Why no projects are selected"
+        title={info.title}
       >
         <Info className="h-3.5 w-3.5" />
       </span>
     </TooltipTrigger>
     <TooltipContent className="max-w-72 text-left text-xs leading-5" side="top">
-      No projects are saved for this job yet. The generated PDF will not include
-      tailored project choices until you select projects below or run automatic
-      generation again.
+      <div className="font-semibold text-foreground">{info.title}</div>
+      <div className="mt-1 text-muted-foreground">{info.description}</div>
     </TooltipContent>
   </Tooltip>
 );
@@ -213,6 +329,8 @@ export const TailoringSections: React.FC<TailoringSectionsProps> = ({
   jobDescription,
   skillsDraft,
   selectedIds,
+  resumeProjectsSettings,
+  isResumeProjectsSettingsLoading = false,
   tracerLinksEnabled,
   tracerEnableBlocked,
   tracerEnableBlockedReason,
@@ -261,6 +379,13 @@ export const TailoringSections: React.FC<TailoringSectionsProps> = ({
         ? "review"
         : "ready";
   const projectsState: SectionState = selectedIds.size > 0 ? "ready" : "none";
+  const noSelectedProjectsInfo = getNoSelectedProjectsInfo({
+    catalog,
+    isCatalogLoading,
+    selectedIds,
+    resumeProjectsSettings,
+    isResumeProjectsSettingsLoading,
+  });
 
   return (
     <TooltipProvider>
@@ -624,7 +749,9 @@ export const TailoringSections: React.FC<TailoringSectionsProps> = ({
                   selectedIds.size > 0 ? String(selectedIds.size) : undefined
                 }
                 badgeAdornment={
-                  projectsState === "none" ? <NoSelectedProjectsInfo /> : null
+                  noSelectedProjectsInfo ? (
+                    <NoSelectedProjectsInfo info={noSelectedProjectsInfo} />
+                  ) : null
                 }
               />
             </AccordionTrigger>

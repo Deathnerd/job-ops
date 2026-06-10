@@ -1,5 +1,6 @@
 import * as api from "@client/api";
 import { useProfile } from "@client/hooks/useProfile";
+import { useSettings } from "@client/hooks/useSettings";
 import { useTracerReadiness } from "@client/hooks/useTracerReadiness";
 import type { Job } from "@shared/types.js";
 import {
@@ -173,6 +174,7 @@ export const TailoringWorkspace: React.FC<TailoringWorkspaceProps> = (
   const persistedPayloadKeyRef = useRef(savedPayloadKey);
   const isMountedRef = useRef(true);
   const { profile, error: profileError } = useProfile();
+  const { settings, isLoading: isSettingsLoading } = useSettings();
   const { readiness: tracerReadiness, isChecking: isTracerReadinessChecking } =
     useTracerReadiness();
 
@@ -483,6 +485,8 @@ export const TailoringWorkspace: React.FC<TailoringWorkspaceProps> = (
       jobDescription,
       skillsDraft,
       selectedIds,
+      resumeProjectsSettings: settings?.resumeProjects.value ?? null,
+      isResumeProjectsSettingsLoading: isSettingsLoading,
       tracerLinksEnabled,
       tracerEnableBlocked,
       tracerEnableBlockedReason,
@@ -534,6 +538,8 @@ export const TailoringWorkspace: React.FC<TailoringWorkspaceProps> = (
       jobDescription,
       skillsDraft,
       selectedIds,
+      settings?.resumeProjects.value,
+      isSettingsLoading,
       tracerLinksEnabled,
       tracerEnableBlocked,
       tracerEnableBlockedReason,
