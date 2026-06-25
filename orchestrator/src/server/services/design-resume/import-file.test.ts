@@ -1091,32 +1091,16 @@ describe("importDesignResumeFromFile", () => {
     expect(codexCallJsonMock).toHaveBeenCalledWith(
       expect.objectContaining({
         jsonSchema: expect.objectContaining({
-          name: "codex_output_schema",
-          schema: expect.objectContaining({
-            additionalProperties: false,
-            properties: expect.objectContaining({
-              basics: expect.objectContaining({
-                additionalProperties: false,
-              }),
-              sections: expect.objectContaining({
-                additionalProperties: false,
-              }),
-            }),
-            required: [
-              "picture",
-              "basics",
-              "summary",
-              "sections",
-              "customSections",
-              "metadata",
-            ],
-          }),
+          name: "design_resume_import",
         }),
       }),
     );
+    expect(codexCallJsonMock.mock.calls[0]?.[0].messages[1]?.content).toContain(
+      "The resume file was uploaded as PDF and converted locally to plain text before extraction.",
+    );
     expect(
       codexCallJsonMock.mock.calls[0]?.[0].messages[1]?.content,
-    ).not.toContain('property named "json"');
+    ).not.toContain("file_data");
     expect(pdfParse).toHaveBeenCalledOnce();
     expect(fetch).not.toHaveBeenCalled();
   });
