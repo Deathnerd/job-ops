@@ -15,6 +15,7 @@ import {
 } from "@server/services/document-text-extraction";
 import { CodexClient } from "@server/services/llm/codex/client";
 import { GeminiCliClient } from "@server/services/llm/gemini-cli/client";
+import { LlmService } from "@server/services/llm/service";
 import type { JsonSchemaDefinition } from "@server/services/llm/types";
 import { resolveLlmRuntimeSettings } from "@server/services/modelSelection";
 import { normalizeReactiveResumeV5Document } from "@server/services/rxresume/document";
@@ -41,6 +42,7 @@ type SupportedImportMediaType =
 type SupportedRuntimeProvider =
   | "openai"
   | "openrouter"
+  | "anthropic"
   | "glm"
   | "gemini"
   | "gemini_cli"
@@ -319,6 +321,9 @@ function normalizeRuntimeProvider(
 ): SupportedRuntimeProvider | null {
   const normalized = provider?.trim().toLowerCase().replace(/[-.]/g, "_");
   if (normalized === "openai") return "openai";
+  if (normalized === "anthropic" || normalized === "claude") {
+    return "anthropic";
+  }
   if (normalized === "openrouter" || normalized === "open_router") {
     return "openrouter";
   }
@@ -1091,7 +1096,7 @@ function parseReactiveResumeJsonFile(content: string): DesignResumeJson {
 }
 
 function buildCapabilityErrorMessage(provider: string): string {
-  return `Resume file import is not available for the current AI provider (${provider}). Connect OpenAI, OpenRouter, Gemini, Gemini (CLI), Codex, OpenAI-compatible, Ollama, or LM Studio to import resumes. PDF and DOCX files can be converted to plain text locally before extraction when native file upload is unavailable.`;
+  return `Resume file import is not available for the current AI provider (${provider}). Connect OpenAI, OpenRouter, Anthropic, Gemini, Gemini (CLI), Codex, OpenAI-compatible, Ollama, or LM Studio to import resumes. PDF and DOCX files can be converted to plain text locally before extraction when native file upload is unavailable.`;
 }
 
 function isFileCapabilityError(message: string): boolean {
@@ -1144,6 +1149,7 @@ function shouldRetryOpenRouterPdfWithAlternateEngine(input: {
 
 function isTextOnlyImportProvider(provider: SupportedRuntimeProvider): boolean {
   return (
+    provider === "anthropic" ||
     provider === "openai_compatible" ||
     provider === "glm" ||
     provider === "ollama" ||
@@ -1156,6 +1162,7 @@ function providerRequiresApiKey(provider: SupportedRuntimeProvider): boolean {
   return (
     provider === "openai" ||
     provider === "openrouter" ||
+    provider === "anthropic" ||
     provider === "gemini" ||
     provider === "glm"
   );
@@ -1599,6 +1606,74 @@ async function extractWithGeminiCli(args: {
   }
 }
 
+async function extractWithAnthropicText(args: {
+  apiKey: string;
+  baseUrl: string | null;
+  model: string;
+  mediaType: SupportedImportMediaType;
+  fileName: string;
+  documentText: string;
+  requestId: string | undefined;
+}): Promise<string> {
+  const startedAt = Date.now();
+  const llm = new LlmService({
+    provider: "anthropic",
+    baseUrl: args.baseUrl,
+    apiKey: args.apiKey,
+  });
+
+  logger.info("Anthropic resume import text extraction started", {
+    requestId: args.requestId ?? null,
+    provider: "anthropic",
+    model: args.model,
+    fileName: args.fileName,
+    mediaType: args.mediaType,
+    documentTextChars: args.documentText.length,
+  });
+
+  const result = await llm.callJson<DesignResumeJson>({
+    model: args.model,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: buildDocumentTextPrompt(
+          args.documentText,
+          args.fileName,
+          args.mediaType,
+        ),
+      },
+    ],
+    jsonSchema: DESIGN_RESUME_IMPORT_CLI_JSON_SCHEMA,
+    signal: AbortSignal.timeout(LOCAL_CHAT_COMPLETIONS_TIMEOUT_MS),
+  });
+
+  if (!result.success) {
+    throw upstreamError(
+      truncate(result.error, 500),
+      args.requestId
+        ? {
+            provider: "anthropic",
+            model: args.model,
+            requestId: args.requestId,
+          }
+        : { provider: "anthropic", model: args.model },
+    );
+  }
+
+  const text = JSON.stringify(result.data);
+  logger.info("Anthropic resume import text extraction completed", {
+    requestId: args.requestId ?? null,
+    provider: "anthropic",
+    model: args.model,
+    fileName: args.fileName,
+    mediaType: args.mediaType,
+    durationMs: elapsedMs(startedAt),
+    resumeJsonChars: text.length,
+  });
+  return text;
+}
+
 async function extractWithCodex(args: {
   model: string;
   mediaType: SupportedImportMediaType;
@@ -1701,6 +1776,23 @@ async function extractResumeFromProvider(args: {
       );
     }
     return extractWithCodex({
+      model: args.model,
+      mediaType: args.mediaType,
+      fileName: args.fileName,
+      documentText: text,
+      requestId: args.requestId,
+    });
+  }
+  if (args.provider === "anthropic") {
+    const text = args.documentText?.trim();
+    if (!text) {
+      throw badRequest(
+        "Anthropic resume import requires plain-text resume content (DOCX or extracted PDF text).",
+      );
+    }
+    return extractWithAnthropicText({
+      apiKey: args.apiKey,
+      baseUrl: args.baseUrl,
       model: args.model,
       mediaType: args.mediaType,
       fileName: args.fileName,

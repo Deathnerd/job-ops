@@ -815,6 +815,59 @@ describe("importDesignResumeFromFile", () => {
     expect(String(body)).toContain("Taylor Quinn");
   });
 
+  it("imports PDFs through extracted text for Claude", async () => {
+    modelSelection.resolveLlmRuntimeSettings.mockResolvedValueOnce({
+      provider: "claude",
+      model: "claude-sonnet-4-6",
+      baseUrl: "https://api.anthropic.com",
+      apiKey: "anthropic-test",
+    });
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          content: [
+            {
+              type: "text",
+              text: `{"basics":{"name":"Taylor Quinn"}}`,
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    await importDesignResumeFromFile({
+      fileName: "resume.pdf",
+      mediaType: "application/pdf",
+      dataBase64: Buffer.from("pdf-data").toString("base64"),
+    });
+
+    expect(pdfParse).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.anthropic.com/v1/messages",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "x-api-key": "anthropic-test",
+          "anthropic-version": "2023-06-01",
+        }),
+      }),
+    );
+
+    const fetchCall = vi.mocked(fetch).mock.calls[0];
+    const body =
+      fetchCall?.[1] && "body" in fetchCall[1] ? fetchCall[1].body : "";
+    expect(String(body)).toContain(
+      "The resume file was uploaded as PDF and converted locally to plain text before extraction.",
+    );
+    expect(String(body)).toContain("Taylor Quinn");
+    expect(String(body)).not.toContain("file_data");
+    expect(String(body)).not.toContain("input_file");
+  });
+
   it("imports PDFs through extracted text for OpenAI-compatible endpoints", async () => {
     modelSelection.resolveLlmRuntimeSettings.mockResolvedValueOnce({
       provider: "openai_compatible",
