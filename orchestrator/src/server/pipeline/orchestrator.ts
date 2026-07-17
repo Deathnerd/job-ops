@@ -400,6 +400,8 @@ export async function runPipeline(
         const retryResult = await discoverJobsStep({
           mergedConfig: retryConfig,
           includeWatchlist: false,
+          preserveFanout: true,
+          fanoutSeedJobs: discoveredJobs,
           shouldCancel: () =>
             getPipelineState(scopeKey).cancelRequestedAt !== null,
         });

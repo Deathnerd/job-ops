@@ -297,11 +297,33 @@ export interface PipelinePendingChallenge {
   sources: ExtractorSourceId[];
 }
 
+export interface PipelineFanoutRoleProgress {
+  role: string;
+  complete: number;
+  running: number;
+  queued: number;
+  check: number;
+}
+
+export interface PipelineFanoutProgress {
+  termCount: number;
+  locationCount: number;
+  sourceCount: number;
+  locations: string[];
+  sources: string[];
+  total: number;
+  capacity: number;
+  results: number;
+  unique: number;
+  roles: PipelineFanoutRoleProgress[];
+}
+
 export interface PipelineProgressState {
   step: PipelineProgressStep;
   message: string;
   detail?: string;
   pendingChallenges?: PipelinePendingChallenge[];
+  fanout?: PipelineFanoutProgress;
   crawlingSource: string | null;
   crawlingSourcesCompleted: number;
   crawlingSourcesTotal: number;
@@ -317,6 +339,7 @@ export interface PipelineProgressState {
   crawlingCurrentUrl?: string;
   jobsDiscovered: number;
   jobsScored: number;
+  jobsExceptional: number;
   jobsProcessed: number;
   totalToProcess: number;
   currentJob?: PipelineProgressCurrentJob;
