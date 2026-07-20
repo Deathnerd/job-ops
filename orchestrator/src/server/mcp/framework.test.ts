@@ -172,6 +172,19 @@ describe("getAllToolDefs", () => {
       ]),
     );
   });
+
+  it("includes every pipeline domain tool", () => {
+    const names = getAllToolDefs().map((def) => def.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "jobops_pipeline_run",
+        "jobops_pipeline_status",
+        "jobops_pipeline_cancel",
+        "jobops_pipeline_presets",
+        "jobops_pipeline_history",
+      ]),
+    );
+  });
 });
 
 describe("registerAllTools", () => {
