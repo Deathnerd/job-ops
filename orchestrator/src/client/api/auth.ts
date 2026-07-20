@@ -213,3 +213,36 @@ export async function changeOwnPassword(password: string): Promise<void> {
     body: JSON.stringify({ password }),
   });
 }
+
+export type ApiKeySummary = {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+};
+
+export type CreatedApiKey = {
+  id: string;
+  name: string;
+  createdAt: string;
+  key: string;
+};
+
+export async function getApiKeys(): Promise<{ keys: ApiKeySummary[] }> {
+  return fetchApi<{ keys: ApiKeySummary[] }>("/auth/api-keys");
+}
+
+export async function createApiKey(name: string): Promise<CreatedApiKey> {
+  return fetchApi<CreatedApiKey>("/auth/api-keys", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function revokeApiKey(id: string): Promise<{ revoked: boolean }> {
+  return fetchApi<{ revoked: boolean }>(
+    `/auth/api-keys/${encodeURIComponent(id)}/revoke`,
+    { method: "POST" },
+  );
+}
