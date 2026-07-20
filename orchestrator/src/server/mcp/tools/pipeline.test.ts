@@ -9,6 +9,7 @@ const PIPELINE_TOOL_NAMES = [
   "jobops_pipeline_status",
   "jobops_pipeline_cancel",
   "jobops_pipeline_presets",
+  "jobops_pipeline_search_plan",
   "jobops_pipeline_history",
 ];
 
@@ -137,6 +138,13 @@ describe.sequential("pipeline domain MCP tools", () => {
       const tool = tools.find((t) => t.name === name);
       expect(tool?.annotations?.readOnlyHint).toBe(true);
     }
+
+    // The search-plan generator never touches stored presets -- it must not
+    // inherit the presets tool's destructive flag.
+    const searchPlan = tools.find(
+      (t) => t.name === "jobops_pipeline_search_plan",
+    );
+    expect(searchPlan?.annotations?.destructiveHint).toBe(false);
   });
 
   it("calls jobops_pipeline_status end-to-end and gets the idle status back", async () => {
@@ -155,6 +163,25 @@ describe.sequential("pipeline domain MCP tools", () => {
       lastRun: unknown;
     };
     expect(data.isRunning).toBe(false);
+  });
+
+  it("calls jobops_pipeline_status with action challenges and gets the mocked pending challenges back", async () => {
+    await boot();
+
+    const rpcResponse = await callMcp(baseUrl, apiKey, {
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: {
+        name: "jobops_pipeline_status",
+        arguments: { action: "challenges" },
+      },
+    });
+
+    expect(rpcResponse.result.isError).toBeFalsy();
+    // test-utils.ts mocks `getPendingChallenges` to always return [].
+    const data = toolCallResultData(rpcResponse) as { challenges: unknown[] };
+    expect(data.challenges).toEqual([]);
   });
 
   it("calls jobops_pipeline_history with action list and gets an empty array back", async () => {

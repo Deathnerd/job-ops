@@ -7,13 +7,17 @@
  *    or continue: starting a fresh run, resuming a run paused waiting for LLM
  *    configuration, and starting the noVNC viewer for a pending Cloudflare
  *    challenge.
- *  - `jobops_pipeline_status` -- the two non-streaming, read-only snapshots
- *    of pipeline state.
+ *  - `jobops_pipeline_status` -- the three non-streaming, read-only snapshots
+ *    of pipeline state: run status, live progress, and pending Cloudflare
+ *    challenges.
  *  - `jobops_pipeline_cancel` -- the single cancel-in-flight-run route.
- *  - `jobops_pipeline_presets` -- CRUD over saved search presets plus the
- *    AI search-plan generator (thematically part of "search configuration",
- *    not stored presets themselves, but there is no other natural home for
- *    it and the brief's tool list has no slot of its own).
+ *  - `jobops_pipeline_presets` -- CRUD over saved search presets. Stored-entity
+ *    CRUD only -- the stateless AI search-plan generator lives in its own
+ *    tool (`jobops_pipeline_search_plan`) so this tool's `destructive: true`
+ *    (from its `delete` action) doesn't mislabel a non-mutating generator.
+ *  - `jobops_pipeline_search_plan` -- the AI search-plan generator. Not
+ *    preset CRUD (it never touches stored presets), but shares the same
+ *    search-configuration shape as `config`/`currentConfig` above.
  *  - `jobops_pipeline_history` -- past pipeline runs and one run's insights.
  *
  * Excluded (no MCP equivalent):
@@ -264,24 +268,28 @@ export const pipelineTools: ToolDef[] = [
   {
     name: "jobops_pipeline_status",
     description:
-      'Poll the pipeline\'s current status and progress. Wraps GET /api/pipeline/status and GET /api/pipeline/progress/snapshot. Note: GET /api/pipeline/progress (the Server-Sent Events live stream) has no MCP equivalent -- poll this tool with action "progress" instead.',
+      'Poll the pipeline\'s current status, live progress, or pending Cloudflare challenges. Wraps GET /api/pipeline/status, GET /api/pipeline/progress/snapshot, and GET /api/pipeline/challenges. Note: GET /api/pipeline/progress (the Server-Sent Events live stream) has no MCP equivalent -- poll this tool with action "progress" instead.',
     readOnly: true,
     coverage: [
       "GET /api/pipeline/status",
       "GET /api/pipeline/progress/snapshot",
+      "GET /api/pipeline/challenges",
     ],
     inputSchema: {
       action: z
-        .enum(["status", "progress"])
+        .enum(["status", "progress", "challenges"])
         .optional()
         .describe(
-          '"status" (default) returns whether the pipeline is running plus the last completed run; "progress" returns the current live progress-state snapshot',
+          '"status" (default) returns whether the pipeline is running plus the last completed run; "progress" returns the current live progress-state snapshot; "challenges" returns pending Cloudflare challenges (non-empty only while the pipeline is paused at the "challenge_required" step)',
         ),
     },
     handler: (args, ctx) => {
       const action = (args.action as string | undefined) ?? "status";
       if (action === "progress") {
         return selfCall(ctx, "GET", "/api/pipeline/progress/snapshot");
+      }
+      if (action === "challenges") {
+        return selfCall(ctx, "GET", "/api/pipeline/challenges");
       }
       return selfCall(ctx, "GET", "/api/pipeline/status");
     },
@@ -297,7 +305,7 @@ export const pipelineTools: ToolDef[] = [
   {
     name: "jobops_pipeline_presets",
     description:
-      "List, create, update, mark used, or delete saved pipeline search presets, or generate a suggested search configuration from a natural-language prompt. Wraps GET/POST /api/pipeline/search-presets, PATCH /api/pipeline/search-presets/:id, POST /api/pipeline/search-presets/:id/used, DELETE /api/pipeline/search-presets/:id, and POST /api/pipeline/search-plan.",
+      "List, create, update, mark used, or delete saved pipeline search presets. Wraps GET/POST /api/pipeline/search-presets, PATCH /api/pipeline/search-presets/:id, POST /api/pipeline/search-presets/:id/used, and DELETE /api/pipeline/search-presets/:id.",
     destructive: true,
     coverage: [
       "GET /api/pipeline/search-presets",
@@ -305,11 +313,10 @@ export const pipelineTools: ToolDef[] = [
       "PATCH /api/pipeline/search-presets/:id",
       "POST /api/pipeline/search-presets/:id/used",
       "DELETE /api/pipeline/search-presets/:id",
-      "POST /api/pipeline/search-plan",
     ],
     inputSchema: {
       action: z
-        .enum(["list", "create", "update", "mark_used", "delete", "plan"])
+        .enum(["list", "create", "update", "mark_used", "delete"])
         .describe("Which preset operation to perform"),
       id: z
         .string()
@@ -328,21 +335,6 @@ export const pipelineTools: ToolDef[] = [
         .optional()
         .describe(
           'Full search configuration (required for "create"; for "update" provide "name" and/or "config")',
-        ),
-      prompt: z
-        .string()
-        .trim()
-        .min(1)
-        .max(2000)
-        .optional()
-        .describe(
-          'Natural-language description of the desired search changes (required for "plan")',
-        ),
-      currentConfig: z
-        .object(pipelineSearchPresetConfigShape)
-        .optional()
-        .describe(
-          'Current search configuration the plan should refine (required for "plan")',
         ),
     },
     handler: (args, ctx) => {
@@ -386,19 +378,40 @@ export const pipelineTools: ToolDef[] = [
         const id = requireField<string>(args, "id", "delete");
         return selfCall(ctx, "DELETE", `/api/pipeline/search-presets/${id}`);
       }
-      if (action === "plan") {
-        const prompt = requireField<string>(args, "prompt", "plan");
-        const currentConfig = requireField<Record<string, unknown>>(
-          args,
-          "currentConfig",
-          "plan",
-        );
-        return selfCall(ctx, "POST", "/api/pipeline/search-plan", {
-          prompt,
-          currentConfig,
-        });
-      }
       throw new Error(`Unknown pipeline_presets action: ${action}`);
+    },
+  },
+  {
+    name: "jobops_pipeline_search_plan",
+    description:
+      "Generate a suggested search configuration from a natural-language prompt and the current configuration. Wraps POST /api/pipeline/search-plan. Stateless -- does not read or write any stored preset.",
+    coverage: ["POST /api/pipeline/search-plan"],
+    inputSchema: {
+      prompt: z
+        .string()
+        .trim()
+        .min(1)
+        .max(2000)
+        .describe("Natural-language description of the desired search changes"),
+      currentConfig: z
+        .object(pipelineSearchPresetConfigShape)
+        .describe("Current search configuration the plan should refine"),
+    },
+    handler: (args, ctx) => {
+      const prompt = requireField<string>(
+        args,
+        "prompt",
+        "pipeline_search_plan",
+      );
+      const currentConfig = requireField<Record<string, unknown>>(
+        args,
+        "currentConfig",
+        "pipeline_search_plan",
+      );
+      return selfCall(ctx, "POST", "/api/pipeline/search-plan", {
+        prompt,
+        currentConfig,
+      });
     },
   },
   {

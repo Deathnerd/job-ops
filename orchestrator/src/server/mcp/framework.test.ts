@@ -181,6 +181,7 @@ describe("getAllToolDefs", () => {
         "jobops_pipeline_status",
         "jobops_pipeline_cancel",
         "jobops_pipeline_presets",
+        "jobops_pipeline_search_plan",
         "jobops_pipeline_history",
       ]),
     );
