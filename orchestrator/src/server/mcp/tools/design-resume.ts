@@ -28,7 +28,7 @@
  *    the profile-picture asset. Wraps `POST /assets` (JSON body variant only),
  *    `DELETE /assets/picture`, and `GET /assets/:assetId/content`.
  *
- * Full route enumeration and exclusions (12 routes total; 10 covered outright,
+ * Full route enumeration and exclusions (12 routes total; 9 covered outright,
  * 2 excluded outright, 1 route split covered/excluded by request-body shape):
  *  - `GET /`, `GET /status`, `GET /export` -- covered (`jobops_resume_get`).
  *  - `PATCH /`, `POST /import/rxresume`, `POST /import/file`,
