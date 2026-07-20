@@ -298,4 +298,55 @@ describe("registerAllTools", () => {
       await cleanup();
     }
   });
+
+  it("serializes a resolved undefined handler result as JSON null", async () => {
+    const defs: ToolDef[] = [
+      {
+        name: "jobops_test_undefined",
+        description: "resolves undefined",
+        inputSchema: {},
+        coverage: [],
+        handler: async () => undefined,
+      },
+    ];
+
+    const { client, cleanup } = await connectedClient(defs);
+    try {
+      const result = await client.callTool({
+        name: "jobops_test_undefined",
+        arguments: {},
+      });
+      expect(result.isError).toBeFalsy();
+      expect(result.content).toEqual([{ type: "text", text: "null" }]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("stringifies a thrown non-Error value on the error path", async () => {
+    const defs: ToolDef[] = [
+      {
+        name: "jobops_test_throws_string",
+        description: "throws a plain string",
+        inputSchema: {},
+        coverage: [],
+        handler: async () => {
+          throw "plain string failure";
+        },
+      },
+    ];
+
+    const { client, cleanup } = await connectedClient(defs);
+    try {
+      const result = await client.callTool({
+        name: "jobops_test_throws_string",
+        arguments: {},
+      });
+      expect(result.isError).toBe(true);
+      const content = result.content as Array<{ type: string; text: string }>;
+      expect(content[0]?.text).toContain("plain string failure");
+    } finally {
+      await cleanup();
+    }
+  });
 });

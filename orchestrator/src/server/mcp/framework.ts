@@ -162,14 +162,20 @@ export function registerAllTools(
           const data = await def.handler(args, ctx);
           return {
             content: [
-              { type: "text" as const, text: JSON.stringify(data, null, 2) },
+              {
+                type: "text" as const,
+                text: JSON.stringify(data ?? null, null, 2),
+              },
             ],
           };
         } catch (error) {
           return {
             isError: true,
             content: [
-              { type: "text" as const, text: (error as Error).message },
+              {
+                type: "text" as const,
+                text: error instanceof Error ? error.message : String(error),
+              },
             ],
           };
         }
