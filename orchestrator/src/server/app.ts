@@ -19,14 +19,10 @@ import {
 import { logger } from "@infra/logger";
 import { runWithRequestContext } from "@infra/request-context";
 import { sanitizeUnknown } from "@infra/sanitize";
-import { verifyToken } from "@server/auth/jwt";
+import { resolveBearerContext } from "@server/auth/bearer-context";
 import { getJobOpsAppConfig } from "@server/config/app-mode";
 import { isDemoMode } from "@server/config/demo";
-import {
-  findActiveKeyByHash,
-  hashApiKey,
-  touchLastUsed,
-} from "@server/repositories/api-keys";
+import { mountMcp } from "@server/mcp/index";
 import * as usersRepo from "@server/repositories/users";
 import { proxyChallengeViewerRequest } from "@server/services/challenge-viewer";
 import { DEFAULT_TENANT_ID } from "@server/tenancy/constants";
@@ -167,50 +163,7 @@ export function createAuthGuard() {
     process.env.NODE_ENV === "test" &&
     process.env.JOBOPS_TEST_AUTH_BYPASS === "1";
 
-  async function getAuthorizationContext(req: express.Request): Promise<{
-    userId: string;
-    tenantId: string;
-    username: string;
-    isSystemAdmin: boolean;
-  } | null> {
-    const authHeader = req.headers.authorization || "";
-    if (!authHeader.startsWith("Bearer ")) return null;
-    const token = authHeader.slice("Bearer ".length).trim();
-    try {
-      let payload: Awaited<ReturnType<typeof verifyToken>> | null = null;
-      try {
-        payload = await verifyToken(token);
-      } catch {
-        payload = null;
-      }
-      if (payload) {
-        const user = await usersRepo.getUserById(payload.userId);
-        if (!user || user.isDisabled || user.workspaceId !== payload.tenantId) {
-          return null;
-        }
-        return {
-          userId: user.id,
-          tenantId: user.workspaceId,
-          username: user.username,
-          isSystemAdmin: user.isSystemAdmin,
-        };
-      }
-      // API-key fallback
-      const keyRow = await findActiveKeyByHash(hashApiKey(token));
-      if (!keyRow) return null;
-      const user = await usersRepo.getUserById(keyRow.userId);
-      if (!user || user.isDisabled) return null;
-      touchLastUsed(keyRow.id);
-      return {
-        userId: user.id,
-        tenantId: user.workspaceId,
-        username: user.username,
-        isSystemAdmin: user.isSystemAdmin,
-      };
-    } catch {
-      return null;
-    }
-  }
+  const getAuthorizationContext = resolveBearerContext;
 
   function isPublicReadOnlyRoute(method: string, path: string): boolean {
     const normalizedMethod = method.toUpperCase();
@@ -439,6 +392,12 @@ export function createApp() {
   // keep a larger JSON limit scoped to this endpoint to allow the maximum
   // validated payload through to route-level validation.
   app.use("/api/jobs/:id/chat", express.json({ limit: "12mb" }));
+
+  // MCP mount: gated by JOBOPS_MCP_ENABLED, parses its own JSON body, and
+  // handles bearer auth itself (401 as a JSON-RPC error) -- registered ahead
+  // of the generic auth guard below so it never passes through it.
+  mountMcp(app);
+
   app.use(express.json());
 
   // Logging middleware
