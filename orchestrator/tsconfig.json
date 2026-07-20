@@ -10,12 +10,11 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "types": ["vitest/globals", "@testing-library/jest-dom", "vite/client"],
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "@server/*": ["src/server/*"],
-      "@infra/*": ["src/server/infra/*"],
-      "@client/*": ["src/client/*"],
+      "@/*": ["./src/*"],
+      "@server/*": ["./src/server/*"],
+      "@infra/*": ["./src/server/infra/*"],
+      "@client/*": ["./src/client/*"],
       "@shared/*": ["../shared/src/*"],
       "@career-boards/bamboohr": ["../career-boards/bamboohr/src/index.ts"],
       "@career-boards/bamboohr/*": ["../career-boards/bamboohr/src/*"],
@@ -26,5 +25,5 @@
     }
   },
   "include": ["src/**/*", "scripts/**/*", "../career-boards/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": ["node_modules", "dist", "src/**/*.stories.tsx"]
 }
