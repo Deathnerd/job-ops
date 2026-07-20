@@ -289,6 +289,7 @@ export const jobsTools: ToolDef[] = [
     name: "jobops_job_notes",
     description:
       "List, add, update, or delete notes on a job. Wraps GET/POST /api/jobs/:id/notes and PATCH/DELETE /api/jobs/:id/notes/:noteId.",
+    destructive: true,
     coverage: [
       "GET /api/jobs/:id/notes",
       "POST /api/jobs/:id/notes",
@@ -352,6 +353,7 @@ export const jobsTools: ToolDef[] = [
     name: "jobops_job_stages",
     description:
       "Manage a job's application-stage timeline: list stage events/tasks, transition to a new stage, edit or delete a stage event, or set the final outcome. Wraps GET /api/jobs/:id/events, GET /api/jobs/:id/tasks, POST /api/jobs/:id/stages, PATCH /api/jobs/:id/events/:eventId, DELETE /api/jobs/:id/events/:eventId, and PATCH /api/jobs/:id/outcome.",
+    destructive: true,
     coverage: [
       "GET /api/jobs/:id/events",
       "GET /api/jobs/:id/tasks",
@@ -440,9 +442,17 @@ export const jobsTools: ToolDef[] = [
       }
       if (action === "update_event") {
         const eventId = requireField<string>(args, "eventId", "update_event");
+        if (args.toStage === "no_change") {
+          throw new Error(
+            'invalid_argument: toStage "no_change" is not valid for update_event',
+          );
+        }
         const body = omitUndefined({
           toStage: args.toStage,
-          occurredAt: args.occurredAt,
+          // PATCH /api/jobs/:id/events/:eventId's occurredAt is NOT
+          // nullable (unlike POST /api/jobs/:id/stages), so a null value
+          // here would be a guaranteed 400. Treat null as omitted.
+          occurredAt: args.occurredAt === null ? undefined : args.occurredAt,
           metadata: args.metadata,
           outcome: args.outcome,
         });
@@ -474,6 +484,7 @@ export const jobsTools: ToolDef[] = [
     name: "jobops_job_documents",
     description:
       "Manage a job's PDF and supporting documents: upload the tailored resume PDF, list/upload/delete supporting documents, fetch a document's content URL, trigger tailoring summarization, or regenerate the resume PDF. Wraps POST /api/jobs/:id/pdf, GET/POST /api/jobs/:id/documents, GET /api/jobs/:id/documents/:documentId/content, DELETE /api/jobs/:id/documents/:documentId, POST /api/jobs/:id/summarize, and POST /api/jobs/:id/generate-pdf.",
+    destructive: true,
     coverage: [
       "POST /api/jobs/:id/pdf",
       "GET /api/jobs/:id/documents",
@@ -541,9 +552,16 @@ export const jobsTools: ToolDef[] = [
       if (action === "upload_pdf" || action === "upload") {
         const fileName = requireField<string>(args, "fileName", action);
         const dataBase64 = requireField<string>(args, "dataBase64", action);
+        // POST /api/jobs/:id/pdf's mediaType is optional but NOT nullable
+        // (unlike POST /api/jobs/:id/documents), so a null value here would
+        // be a guaranteed 400. Treat null as omitted for upload_pdf only.
+        const mediaType =
+          action === "upload_pdf" && args.mediaType === null
+            ? undefined
+            : args.mediaType;
         const body = omitUndefined({
           fileName,
-          mediaType: args.mediaType,
+          mediaType,
           dataBase64,
         });
         const path =

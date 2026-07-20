@@ -142,6 +142,30 @@ describe.sequential("jobs domain MCP tools", () => {
     }
   });
 
+  it("marks the notes/stages/documents tools destructive in tools/list annotations", async () => {
+    await boot();
+
+    const rpcResponse = await callMcp(baseUrl, apiKey, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+      params: {},
+    });
+
+    const tools = rpcResponse.result.tools as Array<{
+      name: string;
+      annotations?: { destructiveHint?: boolean };
+    }>;
+    for (const name of [
+      "jobops_job_notes",
+      "jobops_job_stages",
+      "jobops_job_documents",
+    ]) {
+      const tool = tools.find((t) => t.name === name);
+      expect(tool?.annotations?.destructiveHint).toBe(true);
+    }
+  });
+
   it("calls jobops_jobs_list end-to-end and gets JSON back", async () => {
     await boot();
 
@@ -198,5 +222,69 @@ describe.sequential("jobs domain MCP tools", () => {
     expect(listResponse.result.isError).toBeFalsy();
     const notes = toolCallResultData(listResponse) as Array<{ id: string }>;
     expect(notes.some((note) => note.id === created.id)).toBe(true);
+  });
+
+  it("upload_pdf with mediaType: null succeeds (route rejects null, tool strips it)", async () => {
+    const { jwt } = await boot();
+    const job = await seedManualJob(jwt);
+
+    const fakePdf = Buffer.from("%PDF-1.4\n%%EOF");
+
+    const response = await callMcp(baseUrl, apiKey, {
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: {
+        name: "jobops_job_documents",
+        arguments: {
+          id: job.id,
+          action: "upload_pdf",
+          fileName: "resume.pdf",
+          mediaType: null,
+          dataBase64: fakePdf.toString("base64"),
+        },
+      },
+    });
+
+    expect(response.result.isError).toBeFalsy();
+    const data = toolCallResultData(response) as { pdfPath: string | null };
+    expect(data.pdfPath).toBeTruthy();
+  });
+
+  it('update_event with toStage "no_change" returns isError with a descriptive message', async () => {
+    const { jwt } = await boot();
+    const job = await seedManualJob(jwt);
+
+    const transitionResponse = await callMcp(baseUrl, apiKey, {
+      jsonrpc: "2.0",
+      id: 6,
+      method: "tools/call",
+      params: {
+        name: "jobops_job_stages",
+        arguments: { id: job.id, action: "transition", toStage: "applied" },
+      },
+    });
+    expect(transitionResponse.result.isError).toBeFalsy();
+    const event = toolCallResultData(transitionResponse) as { id: string };
+
+    const updateResponse = await callMcp(baseUrl, apiKey, {
+      jsonrpc: "2.0",
+      id: 7,
+      method: "tools/call",
+      params: {
+        name: "jobops_job_stages",
+        arguments: {
+          id: job.id,
+          action: "update_event",
+          eventId: event.id,
+          toStage: "no_change",
+        },
+      },
+    });
+
+    expect(updateResponse.result.isError).toBe(true);
+    expect(updateResponse.result.content[0].text).toContain(
+      'toStage "no_change" is not valid for update_event',
+    );
   });
 });
