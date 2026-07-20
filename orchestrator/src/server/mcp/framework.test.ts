@@ -197,6 +197,18 @@ describe("getAllToolDefs", () => {
       ]),
     );
   });
+
+  it("includes every design-resume domain tool", () => {
+    const names = getAllToolDefs().map((def) => def.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "jobops_resume_get",
+        "jobops_resume_update",
+        "jobops_resume_render",
+        "jobops_resume_assets",
+      ]),
+    );
+  });
 });
 
 describe("registerAllTools", () => {
