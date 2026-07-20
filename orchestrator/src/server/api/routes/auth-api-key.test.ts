@@ -49,7 +49,9 @@ describe.sequential("API key bearer auth", () => {
       headers: { Authorization: `Bearer ${key.plaintextKey}` },
     });
 
-    expect(res.status).not.toBe(401);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
   });
 
   it("returns the user's identity from GET /api/auth/me with a valid API key", async () => {

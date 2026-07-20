@@ -176,36 +176,40 @@ export function createAuthGuard() {
     const authHeader = req.headers.authorization || "";
     if (!authHeader.startsWith("Bearer ")) return null;
     const token = authHeader.slice("Bearer ".length).trim();
-    let payload: Awaited<ReturnType<typeof verifyToken>> | null = null;
     try {
-      payload = await verifyToken(token);
-    } catch {
-      payload = null;
-    }
-    if (payload) {
-      const user = await usersRepo.getUserById(payload.userId);
-      if (!user || user.isDisabled || user.workspaceId !== payload.tenantId) {
-        return null;
+      let payload: Awaited<ReturnType<typeof verifyToken>> | null = null;
+      try {
+        payload = await verifyToken(token);
+      } catch {
+        payload = null;
       }
+      if (payload) {
+        const user = await usersRepo.getUserById(payload.userId);
+        if (!user || user.isDisabled || user.workspaceId !== payload.tenantId) {
+          return null;
+        }
+        return {
+          userId: user.id,
+          tenantId: user.workspaceId,
+          username: user.username,
+          isSystemAdmin: user.isSystemAdmin,
+        };
+      }
+      // API-key fallback
+      const keyRow = await findActiveKeyByHash(hashApiKey(token));
+      if (!keyRow) return null;
+      const user = await usersRepo.getUserById(keyRow.userId);
+      if (!user || user.isDisabled) return null;
+      touchLastUsed(keyRow.id);
       return {
         userId: user.id,
         tenantId: user.workspaceId,
         username: user.username,
         isSystemAdmin: user.isSystemAdmin,
       };
+    } catch {
+      return null;
     }
-    // API-key fallback
-    const keyRow = await findActiveKeyByHash(hashApiKey(token));
-    if (!keyRow) return null;
-    const user = await usersRepo.getUserById(keyRow.userId);
-    if (!user || user.isDisabled) return null;
-    touchLastUsed(keyRow.id);
-    return {
-      userId: user.id,
-      tenantId: user.workspaceId,
-      username: user.username,
-      isSystemAdmin: user.isSystemAdmin,
-    };
   }
 
   function isPublicReadOnlyRoute(method: string, path: string): boolean {
