@@ -186,6 +186,17 @@ describe("getAllToolDefs", () => {
       ]),
     );
   });
+
+  it("includes every ghostwriter domain tool", () => {
+    const names = getAllToolDefs().map((def) => def.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "jobops_chat_threads",
+        "jobops_chat_send",
+        "jobops_chat_runs",
+      ]),
+    );
+  });
 });
 
 describe("registerAllTools", () => {

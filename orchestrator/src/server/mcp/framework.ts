@@ -12,6 +12,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { z } from "zod";
+import { ghostwriterTools } from "./tools/ghostwriter";
 import { jobsTools } from "./tools/jobs";
 import { pipelineTools } from "./tools/pipeline";
 
@@ -128,7 +129,7 @@ export async function selfCall(
  * import and a spread here.
  */
 export function getAllToolDefs(): ToolDef[] {
-  return [...jobsTools, ...pipelineTools];
+  return [...jobsTools, ...pipelineTools, ...ghostwriterTools];
 }
 
 /**
