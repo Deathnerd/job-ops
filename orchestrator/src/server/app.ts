@@ -22,6 +22,11 @@ import { sanitizeUnknown } from "@infra/sanitize";
 import { verifyToken } from "@server/auth/jwt";
 import { getJobOpsAppConfig } from "@server/config/app-mode";
 import { isDemoMode } from "@server/config/demo";
+import {
+  findActiveKeyByHash,
+  hashApiKey,
+  touchLastUsed,
+} from "@server/repositories/api-keys";
 import * as usersRepo from "@server/repositories/users";
 import { proxyChallengeViewerRequest } from "@server/services/challenge-viewer";
 import { DEFAULT_TENANT_ID } from "@server/tenancy/constants";
@@ -171,8 +176,13 @@ export function createAuthGuard() {
     const authHeader = req.headers.authorization || "";
     if (!authHeader.startsWith("Bearer ")) return null;
     const token = authHeader.slice("Bearer ".length).trim();
+    let payload: Awaited<ReturnType<typeof verifyToken>> | null = null;
     try {
-      const payload = await verifyToken(token);
+      payload = await verifyToken(token);
+    } catch {
+      payload = null;
+    }
+    if (payload) {
       const user = await usersRepo.getUserById(payload.userId);
       if (!user || user.isDisabled || user.workspaceId !== payload.tenantId) {
         return null;
@@ -183,9 +193,19 @@ export function createAuthGuard() {
         username: user.username,
         isSystemAdmin: user.isSystemAdmin,
       };
-    } catch {
-      return null;
     }
+    // API-key fallback
+    const keyRow = await findActiveKeyByHash(hashApiKey(token));
+    if (!keyRow) return null;
+    const user = await usersRepo.getUserById(keyRow.userId);
+    if (!user || user.isDisabled) return null;
+    touchLastUsed(keyRow.id);
+    return {
+      userId: user.id,
+      tenantId: user.workspaceId,
+      username: user.username,
+      isSystemAdmin: user.isSystemAdmin,
+    };
   }
 
   function isPublicReadOnlyRoute(method: string, path: string): boolean {
