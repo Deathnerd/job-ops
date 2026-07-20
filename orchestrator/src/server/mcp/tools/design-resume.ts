@@ -5,7 +5,7 @@
  * `apiRouter.use("/design-resume", designResumeRouter)` in `api/routes.ts`)
  * via `selfCall`.
  *
- * Route -> tool grouping (11 routes total):
+ * Route -> tool grouping (12 routes total):
  *  - `jobops_resume_get` -- every read of the current document: the document
  *    itself, the lightweight status marker, and the export payload. Wraps
  *    `GET /`, `GET /status`, `GET /export`.
@@ -24,11 +24,12 @@
  *  - `jobops_resume_render` -- generates the PDF and returns its metadata
  *    (including a download URL), plus a `download_url` action for the direct
  *    binary-serving route. Wraps `POST /generate-pdf` and `GET /pdf`.
- *  - `jobops_resume_assets` -- list, delete, and get-content-URL for the
- *    profile-picture asset. Wraps `DELETE /assets/picture` and
- *    `GET /assets/:assetId/content`.
+ *  - `jobops_resume_assets` -- list, upload, delete, and get-content-URL for
+ *    the profile-picture asset. Wraps `POST /assets` (JSON body variant only),
+ *    `DELETE /assets/picture`, and `GET /assets/:assetId/content`.
  *
- * Full route enumeration and exclusions:
+ * Full route enumeration and exclusions (12 routes total; 10 covered outright,
+ * 2 excluded outright, 1 route split covered/excluded by request-body shape):
  *  - `GET /`, `GET /status`, `GET /export` -- covered (`jobops_resume_get`).
  *  - `PATCH /`, `POST /import/rxresume`, `POST /import/file`,
  *    `POST /ai/field-suggestion` -- covered (`jobops_resume_update`).
@@ -42,19 +43,22 @@
  *    via `res.sendFile`. Covered instead by `jobops_resume_render`'s
  *    "download_url" action, which returns `{ url: "/api/design-resume/pdf" }`
  *    -- same pattern as `jobops_job_get`'s "pdf_url" action in jobs.ts.
- *  - `POST /assets` -- EXCLUDED, category binary-upload, reason "multipart
- *    upload unsupported over MCP v1" (per task brief). This route actually
- *    has two request-body shapes: a raw-binary path (`Buffer.isBuffer(req.body)`,
- *    driven by `x-file-name`/`x-base-revision` headers and a raw
- *    octet-stream body) and a JSON path (`{ fileName, dataUrl, ... }`, a
- *    base64 data URL much like `jobops_job_documents`' "upload"/"upload_pdf"
- *    actions in jobs.ts, which ARE covered). Only the first shape is
- *    literally unsupported over MCP's JSON-args transport. The brief's
- *    exclusion is honored for the whole route anyway -- picture upload is a
- *    minor feature, and supporting only the JSON half while excluding the
- *    binary half would leave a confusing "upload sometimes works" tool
- *    surface for no real gain. If a future consumer needs JSON-based picture
- *    upload over MCP, it's a small, low-risk follow-up.
+ *  - `POST /assets` -- SPLIT. This route has two request-body shapes: a
+ *    raw-binary path (`Buffer.isBuffer(req.body)`, driven by
+ *    `x-file-name`/`x-base-revision` headers and a raw octet-stream body) and
+ *    a JSON path (`uploadSchema = pictureMutationSchema.extend({ fileName,
+ *    dataUrl })`). The raw-binary path is EXCLUDED, category binary-upload,
+ *    reason "multipart upload unsupported over MCP v1" (per task brief) --
+ *    genuinely impossible over MCP's JSON-args transport. The JSON path IS
+ *    covered, by `jobops_resume_assets`' "upload" action -- it's a plain JSON
+ *    body, no different in kind from `jobops_job_documents`' already-covered
+ *    "upload"/"upload_pdf" actions in jobs.ts. Note `dataUrl` here is a FULL
+ *    `data:<mime>;base64,<bytes>` string (parsed by `parseDataUrl`), NOT a
+ *    bare base64 payload like jobs.ts's `dataBase64` -- do not confuse the
+ *    two shapes. Also note this route (both branches) calls
+ *    `assertPictureSupportEnabled`, which 409s unless JobOps is configured as
+ *    publicly reachable -- callers should expect a conflict in most
+ *    self-hosted/dev setups, not a bug.
  *  - `GET /assets/:assetId/content` -- EXCLUDED, category binary-download:
  *    serves raw asset bytes with a `Content-Type` header. Covered instead by
  *    `jobops_resume_assets`' "content_url" action, which returns
@@ -100,6 +104,10 @@ function requireField<T>(
   return value as T;
 }
 
+function isJsonPointer(value: string): boolean {
+  return value === "" || value.startsWith("/");
+}
+
 const patchOperationSchema = z
   .object({
     op: z
@@ -107,7 +115,7 @@ const patchOperationSchema = z
       .describe("JSON Patch (RFC 6902) operation type"),
     path: z
       .string()
-      .refine((value) => value === "" || value.startsWith("/"), {
+      .refine(isJsonPointer, {
         message:
           'Patch paths must be valid JSON Pointers -- start with "/", or "" for the root.',
       })
@@ -118,6 +126,10 @@ const patchOperationSchema = z
       .describe('Value for "add", "replace", and "test" operations'),
     from: z
       .string()
+      .refine(isJsonPointer, {
+        message:
+          'Patch "from" paths must be valid JSON Pointers -- start with "/", or "" for the root.',
+      })
       .optional()
       .describe('Source JSON Pointer path for "move" and "copy" operations'),
   })
@@ -376,38 +388,54 @@ export const designResumeTools: ToolDef[] = [
   {
     name: "jobops_resume_assets",
     description:
-      'List the current document\'s assets, delete the profile picture asset, or get an asset\'s content-download URL. Wraps DELETE /api/design-resume/assets/picture and GET /api/design-resume/assets/:assetId/content ("content_url"). "list" has no dedicated route -- it reads GET /api/design-resume and returns just its "assets" array. Binary asset upload is NOT supported over MCP v1 (multipart upload unsupported over MCP v1) -- there is no "upload" action.',
+      'List the current document\'s assets, upload a new profile picture, delete the profile picture asset, or get an asset\'s content-download URL. Wraps GET /api/design-resume (for "list"), POST /api/design-resume/assets (JSON body variant only, for "upload"), DELETE /api/design-resume/assets/picture ("delete"), and GET /api/design-resume/assets/:assetId/content ("content_url"). "list" has no dedicated route -- it reads GET /api/design-resume and returns just its "assets" array. Only JSON-body picture upload is supported: raw multipart/binary upload is NOT supported over MCP v1 (multipart upload unsupported over MCP v1). "upload" (like "delete") requires JobOps to be configured as publicly reachable -- otherwise the route returns a 409 conflict, surfaced here as a thrown error.',
     destructive: true,
     coverage: [
       'GET /api/design-resume (assets field, for "list")',
+      "POST /api/design-resume/assets (JSON body variant only)",
       "DELETE /api/design-resume/assets/picture",
       "GET /api/design-resume/assets/:assetId/content",
     ],
     inputSchema: {
       action: z
-        .enum(["list", "delete", "content_url"])
+        .enum(["list", "upload", "delete", "content_url"])
         .optional()
         .describe(
-          '"list" (default) returns the document\'s assets array; "delete" removes the profile picture asset; "content_url" returns an asset\'s download URL',
+          '"list" (default) returns the document\'s assets array; "upload" replaces the profile picture; "delete" removes the profile picture asset; "content_url" returns an asset\'s download URL',
         ),
       assetId: z
         .string()
         .min(1)
         .optional()
         .describe('Asset id (required for "content_url")'),
+      fileName: z
+        .string()
+        .trim()
+        .min(1)
+        .max(255)
+        .optional()
+        .describe('Uploaded picture file name (required for "upload")'),
+      dataUrl: z
+        .string()
+        .trim()
+        .min(1)
+        .optional()
+        .describe(
+          'Uploaded picture as a FULL data URL, e.g. "data:image/png;base64,iVBORw0..." -- NOT a bare base64 payload (required for "upload")',
+        ),
       baseRevision: z
         .number()
         .int()
         .min(1)
         .optional()
         .describe(
-          'Revision the caller last read, for optimistic concurrency ("delete" only)',
+          'Revision the caller last read, for optimistic concurrency ("upload" and "delete" only)',
         ),
       document: z
         .unknown()
         .optional()
         .describe(
-          'Base document to apply the picture removal to, if different from the currently stored one ("delete" only)',
+          'Base document to apply the picture change to, if different from the currently stored one ("upload" and "delete" only)',
         ),
     },
     handler: async (args, ctx) => {
@@ -418,6 +446,17 @@ export const designResumeTools: ToolDef[] = [
           assets?: unknown[];
         };
         return document.assets ?? [];
+      }
+      if (action === "upload") {
+        const fileName = requireField<string>(args, "fileName", "upload");
+        const dataUrl = requireField<string>(args, "dataUrl", "upload");
+        const body = omitUndefined({
+          fileName,
+          dataUrl,
+          baseRevision: args.baseRevision,
+          document: args.document,
+        });
+        return selfCall(ctx, "POST", "/api/design-resume/assets", body);
       }
       if (action === "delete") {
         const body = omitUndefined({

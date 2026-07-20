@@ -275,6 +275,38 @@ describe.sequential("design-resume domain MCP tools", () => {
     expect(assets).toEqual([]);
   });
 
+  it("upload surfaces the public-availability 409 conflict deterministically in test env", async () => {
+    await boot();
+    await seedResumeDocument();
+
+    // getJobOpsPublicAvailability rejects 127.0.0.1 (the test server's own
+    // origin) as a local/private hostname regardless of JOBOPS_PUBLIC_BASE_URL
+    // -- see tracer-links.ts's isLocalOrPrivateHostname / the identical
+    // assertion in tracer-links.test.ts ("reports unavailable readiness for
+    // localhost/private origins"). Picture upload always 409s under this
+    // bootstrap, so assert that specific, deterministic outcome rather than
+    // a generic isError check.
+    const tinyPngDataUrl =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
+    const response = await callMcp(baseUrl, apiKey, {
+      jsonrpc: "2.0",
+      id: 8,
+      method: "tools/call",
+      params: {
+        name: "jobops_resume_assets",
+        arguments: {
+          action: "upload",
+          fileName: "avatar.png",
+          dataUrl: tinyPngDataUrl,
+        },
+      },
+    });
+
+    expect(response.result.isError).toBe(true);
+    expect(response.result.content[0].text).toContain("internet-reachable");
+  });
+
   it("returns a content_url without bytes for an asset id", async () => {
     await boot();
 
