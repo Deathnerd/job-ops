@@ -1,5 +1,5 @@
 import type { Server } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { startServer, stopServer } from "../api/routes/test-utils";
 
 const MCP_ACCEPT_HEADER = "application/json, text/event-stream";
@@ -111,5 +111,53 @@ describe.sequential("MCP mount", () => {
     expect(dataLine).toBeTruthy();
     const body = JSON.parse(dataLine?.slice("data: ".length) ?? "");
     expect(body.result.serverInfo.name).toBe("jobops");
+  });
+
+  it("returns a 500 JSON-RPC error instead of crashing when the handler throws", async () => {
+    // Force an internal throw inside the POST /mcp try block (registerAllTools)
+    // to prove the async-rejection guard routes it to a proper JSON-RPC 500
+    // instead of an unhandled rejection that would kill the process.
+    vi.doMock("./framework", () => ({
+      registerAllTools: vi.fn(() => {
+        throw new Error("boom: simulated registerAllTools failure");
+      }),
+    }));
+
+    try {
+      ({ server, baseUrl, closeDb, tempDir } = await startServer({
+        env: {
+          JOBOPS_MCP_ENABLED: "true",
+          BASIC_AUTH_USER: "admin",
+          BASIC_AUTH_PASSWORD: "secret",
+          JWT_SECRET: "an-explicit-jwt-secret-with-at-least-32-chars",
+          JOBOPS_TEST_AUTH_BYPASS: "0",
+        },
+      }));
+
+      const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: "admin", password: "secret" }),
+      });
+      const loginBody = await loginRes.json();
+
+      const res = await fetch(`${baseUrl}/mcp`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: MCP_ACCEPT_HEADER,
+          Authorization: `Bearer ${loginBody.data.token}`,
+        },
+        body: initializeBody(),
+      });
+
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body.jsonrpc).toBe("2.0");
+      expect(body.error.code).toBe(-32603);
+      expect(body.id).toBeNull();
+    } finally {
+      vi.doUnmock("./framework");
+    }
   });
 });

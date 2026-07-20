@@ -8,6 +8,7 @@
  * handler.
  */
 
+import { logger } from "@infra/logger";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { resolveBearerContext } from "@server/auth/bearer-context";
@@ -37,22 +38,33 @@ export function mountMcp(app: express.Express): void {
       return;
     }
 
-    const server = new McpServer({ name: "jobops", version: "1.0.0" });
-    registerAllTools(server, {
-      bearerKey: extractBearerKey(req),
-      baseUrl: `http://localhost:${process.env.PORT || 3001}`,
-    });
+    try {
+      const server = new McpServer({ name: "jobops", version: "1.0.0" });
+      registerAllTools(server, {
+        bearerKey: extractBearerKey(req),
+        baseUrl: `http://localhost:${process.env.PORT || 3001}`,
+      });
 
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-    });
-    res.on("close", () => {
-      void transport.close();
-      void server.close();
-    });
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+      });
+      res.on("close", () => {
+        void transport.close().catch(() => {});
+        void server.close().catch(() => {});
+      });
 
-    await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+    } catch (error) {
+      logger.error("MCP request handler failed", { error });
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: "2.0",
+          error: { code: -32603, message: "Internal error" },
+          id: null,
+        });
+      }
+    }
   });
 
   app.get("/mcp", (_req, res) => res.status(405).end());
