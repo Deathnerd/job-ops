@@ -6,6 +6,7 @@ import {
   unauthorized,
 } from "@infra/errors";
 import { asyncRoute, fail, ok } from "@infra/http";
+import { getUserId } from "@infra/request-context";
 import { blacklistToken, signToken, verifyToken } from "@server/auth/jwt";
 import { verifyPassword } from "@server/auth/password";
 import { getJobOpsAppConfig } from "@server/config/app-mode";
@@ -254,15 +255,17 @@ authRouter.post(
 
 authRouter.get(
   "/me",
-  asyncRoute(async (req: Request, res: Response) => {
-    const authHeader = req.headers.authorization || "";
-    if (!authHeader.startsWith("Bearer ")) {
+  asyncRoute(async (_req: Request, res: Response) => {
+    // The auth guard (app.ts) already verified the bearer credential -- JWT
+    // or API key -- and stashed the resolved identity in the request
+    // context. Read it from there instead of re-verifying the token as a
+    // JWT, so API-key-authenticated callers work the same as JWT callers.
+    const userId = getUserId();
+    if (!userId) {
       fail(res, unauthorized("Authentication required"));
       return;
     }
-    const token = authHeader.slice("Bearer ".length).trim();
-    const payload = await verifyToken(token);
-    const user = await usersRepo.getUserById(payload.userId);
+    const user = await usersRepo.getUserById(userId);
     if (!user || user.isDisabled) {
       fail(res, unauthorized("Authentication required"));
       return;

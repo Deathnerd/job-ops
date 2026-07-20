@@ -40,11 +40,6 @@ describe.sequential("API key bearer auth", () => {
     return meBody.data.user.id as string;
   }
 
-  // Note: /api/auth/me re-verifies the JWT itself rather than relying on the
-  // auth guard's resolved request context, so it does not exercise the
-  // guard's API-key fallback. /api/settings (like the JWT coverage in
-  // auth.test.ts) goes through the guard normally and is used here instead.
-
   it("accepts a valid API key as bearer auth on a protected route", async () => {
     const userId = await getUserId();
     const { createApiKey } = await import("@server/repositories/api-keys");
@@ -55,6 +50,22 @@ describe.sequential("API key bearer auth", () => {
     });
 
     expect(res.status).not.toBe(401);
+  });
+
+  it("returns the user's identity from GET /api/auth/me with a valid API key", async () => {
+    const userId = await getUserId();
+    const { createApiKey } = await import("@server/repositories/api-keys");
+    const key = await createApiKey({ userId, name: "t" });
+
+    const res = await fetch(`${baseUrl}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${key.plaintextKey}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.user.id).toBe(userId);
+    expect(body.data.analyticsDistinctId).toBeTruthy();
   });
 
   it("rejects a revoked key", async () => {
