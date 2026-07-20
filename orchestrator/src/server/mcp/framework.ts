@@ -12,6 +12,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { z } from "zod";
+import { jobsTools } from "./tools/jobs";
 
 /**
  * `McpServer#registerTool` is generic over `InputArgs extends undefined |
@@ -126,7 +127,7 @@ export async function selfCall(
  * import and a spread here.
  */
 export function getAllToolDefs(): ToolDef[] {
-  return [];
+  return [...jobsTools];
 }
 
 /**

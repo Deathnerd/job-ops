@@ -156,8 +156,21 @@ describe("selfCall", () => {
 });
 
 describe("getAllToolDefs", () => {
-  it("returns an empty array until domain tool files are added", () => {
-    expect(getAllToolDefs()).toEqual([]);
+  it("includes every jobs domain tool", () => {
+    const names = getAllToolDefs().map((def) => def.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "jobops_jobs_list",
+        "jobops_job_get",
+        "jobops_job_update",
+        "jobops_job_notes",
+        "jobops_job_stages",
+        "jobops_job_documents",
+        "jobops_job_application",
+        "jobops_job_actions",
+        "jobops_jobs_maintenance",
+      ]),
+    );
   });
 });
 
