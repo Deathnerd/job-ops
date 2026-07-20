@@ -727,6 +727,25 @@ export const authSessions = sqliteTable(
   }),
 );
 
+export const apiKeys = sqliteTable(
+  "api_keys",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    keyHash: text("key_hash").notNull().unique(),
+    createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+    lastUsedAt: text("last_used_at"),
+    revokedAt: text("revoked_at"),
+  },
+  (table) => ({
+    keyHashIndex: index("idx_api_keys_key_hash").on(table.keyHash),
+    userIdIndex: index("idx_api_keys_user_id").on(table.userId),
+  }),
+);
+
 export const designResumeDocuments = sqliteTable("design_resume_documents", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id")
