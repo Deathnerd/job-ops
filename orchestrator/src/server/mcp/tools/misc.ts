@@ -109,8 +109,12 @@
  *    Not `readOnly` (most actions mutate onboarding/settings state) and not
  *    `destructive` (no delete-capable route in this group).
  *
- * See `MISC_DOMAIN_EXCLUSIONS` for every route intentionally left
- * uncovered, with category + reasoning.
+ * See `MISC_DOMAIN_EXCLUSIONS` for every `/api/*` route intentionally left
+ * uncovered, with category + reasoning. See
+ * `MISC_NON_API_ROUTES_DOCUMENTATION_ONLY` for two bonus non-`/api` routes
+ * noted for completeness -- NOT consumed by Task 9's coverage contract test,
+ * since the route walk it runs is scoped to `apiRouter` and would never see
+ * these regardless.
  */
 
 import { EXTRACTOR_SOURCE_IDS } from "@shared/extractors";
@@ -199,6 +203,24 @@ export const MISC_DOMAIN_EXCLUSIONS: ReadonlyArray<{
     reason:
       "This is n8n's (or any external scheduler's) integration point for triggering a pipeline run out-of-band -- authenticated by a separate `WEBHOOK_SECRET` bearer scheme, not this server's user/API-key auth, and callable from outside the app entirely. `jobops_pipeline_run` (pipeline.ts, Task 8a) already covers \"start a pipeline run\" for MCP callers; this route is the external system's contract, not a redundant second path to expose here.",
   },
+];
+
+/**
+ * Bonus/out-of-scope notes, not one of the brief's named exclusion
+ * categories and NOT part of the `/api/*` contract `MISC_DOMAIN_EXCLUSIONS`
+ * documents: none of these routes are mounted under `apiRouter` (routes.ts)
+ * at all, so Task 9's coverage-contract test (which walks `apiRouter`
+ * only) would never see them regardless of whether they're listed here.
+ * Kept purely as documentation of routes a reader might otherwise wonder
+ * about -- deliberately a SEPARATE constant from `MISC_DOMAIN_EXCLUSIONS`
+ * so it can never accidentally get spread into the map the coverage test
+ * actually consumes.
+ */
+export const MISC_NON_API_ROUTES_DOCUMENTATION_ONLY: ReadonlyArray<{
+  route: string;
+  category: string;
+  reason: string;
+}> = [
   {
     route: "ALL /stats/* (app.ts, not under /api)",
     category: "upstream-analytics",
@@ -206,11 +228,22 @@ export const MISC_DOMAIN_EXCLUSIONS: ReadonlyArray<{
       "A raw byte-for-byte reverse proxy to the self-hosted Umami analytics instance (`getUmamiUpstreamUrl`, streamed response body, non-JSON, no `{ ok, data }` envelope) -- not a JobOps API route at all, and not something an MCP tool could usefully wrap without inventing a second, parallel analytics API. Named directly in the task brief as an expected exclusion.",
   },
   {
-    route:
-      "GET /health, GET /cv/:slug, ALL /challenge-viewer/session (app.ts, not under /api)",
+    route: "GET /health (app.ts, not under /api)",
     category: "non-api-utility",
     reason:
-      "Bonus/out-of-scope note, not one of the brief's named categories: none of these are mounted under `apiRouter` (routes.ts) at all, so they are outside the `/api/*` surface this sweep (and presumably Task 9's route walk) targets. `GET /health` is a bare liveness probe; `GET /cv/:slug` and `/challenge-viewer/session` are HTML/redirect passthroughs for a human's browser (tracer-link redirect resolution and Cloudflare-challenge solving UI), not JSON API calls with anything for an MCP tool to return.",
+      "A bare liveness probe, not mounted under `apiRouter`, with nothing for an MCP tool to usefully return beyond a 200.",
+  },
+  {
+    route: "GET /cv/:slug (app.ts, not under /api)",
+    category: "non-api-utility",
+    reason:
+      "HTML/redirect passthrough for a human's browser (tracer-link redirect resolution), not mounted under `apiRouter` and not a JSON API call.",
+  },
+  {
+    route: "ALL /challenge-viewer/session (app.ts, not under /api)",
+    category: "non-api-utility",
+    reason:
+      "Cloudflare-challenge-solving viewer UI passthrough for a human's browser, not mounted under `apiRouter` and not a JSON API call.",
   },
 ];
 

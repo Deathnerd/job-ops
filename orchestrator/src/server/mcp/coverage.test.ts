@@ -12,38 +12,43 @@
  *  2. Every `coverage` claim corresponds to a real endpoint (catches typos
  *     and stale claims after a route is renamed/removed).
  *
- * Matching is intentionally more permissive than plain string equality on
- * the normalized "METHOD /path" string, for two reasons that are real
- * properties of this codebase's already-committed domain tool files (not
- * something introduced here):
+ * Matching is EXACT segment-by-segment equality after normalization
+ * (`:name` params -> `:param`, trailing slash stripped, lower-cased). A
+ * wildcard match (":param" satisfied by any segment, on either side) was
+ * tried first and reverted: it silently matched unrelated same-method,
+ * same-segment-count routes -- e.g. `GET /api/jobs/revision` would falsely
+ * appear covered by an unrelated `GET /api/jobs/:id` claim purely because
+ * both are two segments. That defeats the entire point of this test (see
+ * the third `it()` below, which pins this exact regression down
+ * permanently).
  *
- *  - Several `coverage` entries carry a human-readable trailing annotation
- *    in parens, e.g. `"POST /api/design-resume/assets (JSON body variant
- *    only)"` (see design-resume.ts) -- stripped before comparison.
- *  - Several Express routes are generic action dispatchers with a single
- *    `:action`-style param (e.g. `POST
- *    /api/post-application/providers/:provider/actions/:action`), but the
- *    domain file's `coverage` array documents each logical sub-action
- *    separately using the literal action name in that position (e.g.
- *    `"POST .../actions/status"`, `"POST .../actions/connect"`) rather than
- *    repeating the generic `:action` placeholder -- see the file header of
- *    post-application.ts, which explains this is intentional
- *    (audit-readability at the cost of not being a literal 1:1 string match
- *    with the walked route). A real Express route with a `:param` segment
- *    can be satisfied by ANY literal (or `:param`) segment in that same
- *    position on the claim side, and vice versa -- segment-wise matching
- *    with `:param` acting as a wildcard on either side.
+ * The one legitimate need for anything beyond plain string equality is
+ * `post-application-providers.ts`'s single physical dispatcher route (`POST
+ * /providers/:provider/actions/:action`), documented in `post-application.ts`
+ * per-sub-action using literal action names instead of repeating `:action`.
+ * Rather than loosen matching (which is what caused the bug above), the
+ * walked dispatcher route is pre-expanded into one literal endpoint per
+ * action in `POST_APPLICATION_PROVIDER_ACTIONS` (the actual source of truth
+ * the route validates `:action` against, imported from `@shared/types` --
+ * not a hand-typed list that could drift), and matched with plain equality
+ * like everything else. This is why `sync` now needs (and has) its own
+ * `EXCLUDED` entry: post-application.ts's own file header already documents
+ * it as intentionally unexposed (timeout-infeasible), and expansion makes
+ * that concrete gap visible instead of it being silently absorbed by a
+ * same-shape claim for a sibling action.
  *
- * This is verified NOT to hide genuine gaps: matching still requires the
- * same HTTP method and the same number of path segments, and every other
- * segment to match literally. It only widens the single dynamic-segment
- * position(s) that already carry no discriminating information at the
- * Express-routing layer.
+ * `coverage` entries also occasionally carry a human-readable trailing
+ * annotation in parens, e.g. `"POST /api/design-resume/assets (JSON body
+ * variant only)"` (see design-resume.ts) -- stripped before comparison.
  */
 
 import { apiRouter } from "@server/api/routes";
+import {
+  POST_APPLICATION_PROVIDER_ACTIONS,
+  type PostApplicationProviderAction,
+} from "@shared/types";
 import { describe, expect, it } from "vitest";
-import { getAllToolDefs } from "./framework";
+import { getAllToolDefs, type ToolDef } from "./framework";
 import { MISC_DOMAIN_EXCLUSIONS } from "./tools/misc";
 
 // Reconstruct "METHOD /api/<path>" strings from the express 4 router tree.
@@ -134,6 +139,12 @@ const ADDITIONAL_EXCLUSIONS: ReadonlyArray<{
     reason:
       'Serves raw asset bytes with a Content-Type header, not a JSON envelope. jobops_resume_assets\'s "content_url" action returns { url: "/api/design-resume/assets/:assetId/content" } instead of proxying binary content through an MCP tool result.',
   },
+  {
+    route: "POST /api/post-application/providers/:provider/actions/sync",
+    category: "timeout-infeasible",
+    reason:
+      'gmailProvider.sync -> runGmailIngestionSync is a single fully-synchronous await with no per-call ceiling (see post-application.ts\'s file header for the full latency analysis) -- comfortably exceeds selfCall\'s fixed 60s timeout, with no polling/run-id alternative. Triggering a sync is left to the web UI; jobops_postapp_sync\'s "runs"/"run_messages" actions still let an agent read the results of a UI-triggered sync. The sibling actions on this same physical dispatcher route ("connect", "status", "disconnect") ARE covered by jobops_postapp_providers -- this exclusion only applies to the "sync" literal-action expansion (see DISPATCHER_ACTION_EXPANSIONS below).',
+  },
 ];
 
 const EXCLUDED: ReadonlyArray<{
@@ -142,12 +153,7 @@ const EXCLUDED: ReadonlyArray<{
   reason: string;
 }> = [...MISC_DOMAIN_EXCLUSIONS, ...ADDITIONAL_EXCLUSIONS];
 
-// --- Normalization + segment-wise matching -------------------------------
-//
-// Plain string equality on the normalized "METHOD /path" string is not
-// enough on its own -- see the file-header comment for why. Matching is
-// done segment-by-segment, with a `:param` segment on EITHER side acting as
-// a wildcard for that position.
+// --- Normalization + exact matching ---------------------------------------
 
 type Endpoint = { method: string; segments: string[]; raw: string };
 
@@ -170,12 +176,32 @@ function toEndpoint(raw: string): Endpoint {
   return { method, segments, raw };
 }
 
+function endpointKey(e: Endpoint): string {
+  return `${e.method} /${e.segments.join("/")}`;
+}
+
 function endpointsMatch(a: Endpoint, b: Endpoint): boolean {
-  if (a.method !== b.method) return false;
-  if (a.segments.length !== b.segments.length) return false;
-  return a.segments.every((seg, i) => {
-    const other = b.segments[i];
-    return seg === other || seg === ":param" || other === ":param";
+  return endpointKey(a) === endpointKey(b);
+}
+
+/**
+ * The one physical route documented per-sub-action instead of with a
+ * literal `:action` claim -- see the file-header comment. Expanding it here
+ * (rather than loosening the matcher) keeps matching everywhere else exact.
+ */
+const DISPATCHER_ROUTE_KEY =
+  "post /api/post-application/providers/:param/actions/:param";
+
+function expandDispatcherActions(real: Endpoint[]): Endpoint[] {
+  return real.flatMap((e) => {
+    if (endpointKey(e) !== DISPATCHER_ROUTE_KEY) return [e];
+    return POST_APPLICATION_PROVIDER_ACTIONS.map(
+      (action: PostApplicationProviderAction) => ({
+        method: e.method,
+        segments: [...e.segments.slice(0, -1), action],
+        raw: `${e.raw} [action=${action}]`,
+      }),
+    );
   });
 }
 
@@ -185,19 +211,26 @@ function walkApiRouter(): string[] {
   return [...new Set(endpoints)];
 }
 
+function realEndpoints(): Endpoint[] {
+  return expandDispatcherActions(walkApiRouter().map(toEndpoint));
+}
+
+function claimedEndpoints(defs: ToolDef[] = getAllToolDefs()): Endpoint[] {
+  return defs.flatMap((t) => t.coverage).map(toEndpoint);
+}
+
+function findMissing(real: Endpoint[], claimed: Endpoint[]): Endpoint[] {
+  const excluded = EXCLUDED.map((e) => toEndpoint(e.route));
+  return real.filter(
+    (r) =>
+      !claimed.some((c) => endpointsMatch(c, r)) &&
+      !excluded.some((e) => endpointsMatch(e, r)),
+  );
+}
+
 describe("MCP route coverage contract", () => {
   it("every /api endpoint is covered by a tool or excluded with a reason", () => {
-    const realEndpoints = walkApiRouter().map(toEndpoint);
-    const claimedEndpoints = getAllToolDefs()
-      .flatMap((t) => t.coverage)
-      .map(toEndpoint);
-    const excludedEndpoints = EXCLUDED.map((e) => toEndpoint(e.route));
-
-    const missing = realEndpoints.filter(
-      (real) =>
-        !claimedEndpoints.some((c) => endpointsMatch(c, real)) &&
-        !excludedEndpoints.some((e) => endpointsMatch(e, real)),
-    );
+    const missing = findMissing(realEndpoints(), claimedEndpoints());
 
     expect(
       missing.map((m) => m.raw),
@@ -206,18 +239,46 @@ describe("MCP route coverage contract", () => {
   });
 
   it("coverage claims refer to real endpoints (no typos)", () => {
-    const realEndpoints = walkApiRouter().map(toEndpoint);
-    const claimedEndpoints = getAllToolDefs()
-      .flatMap((t) => t.coverage)
-      .map(toEndpoint);
+    const real = realEndpoints();
+    const claimed = claimedEndpoints();
 
-    const bogus = claimedEndpoints.filter(
-      (claim) => !realEndpoints.some((real) => endpointsMatch(real, claim)),
+    const bogus = claimed.filter(
+      (claim) => !real.some((r) => endpointsMatch(r, claim)),
     );
 
     expect(
       bogus.map((b) => b.raw),
       `Coverage claims with no matching real endpoint:\n${bogus.map((b) => b.raw).join("\n")}`,
     ).toEqual([]);
+  });
+
+  it("regression: removing a claimed route's coverage is detected as missing", () => {
+    // Pins down a real bug this test previously had: an earlier version
+    // matched `:param` as a wildcard against ANY segment (including a
+    // literal one), so removing "GET /api/jobs/revision" from every tool's
+    // coverage stayed green -- it silently matched the unrelated, same
+    // method/segment-count claim "GET /api/jobs/:id". This constructs that
+    // exact scenario (clone getAllToolDefs()'s output, strip the target
+    // route from whichever tool claims it) and asserts the missing-route
+    // computation reports exactly the removed route, proving the exploit
+    // stays closed.
+    const TARGET_ROUTE = "GET /api/jobs/revision";
+    const originalDefs = getAllToolDefs();
+    const claimedByAnyDef = originalDefs.some((t) =>
+      t.coverage.includes(TARGET_ROUTE),
+    );
+    expect(claimedByAnyDef).toBe(true);
+
+    const tamperedDefs: ToolDef[] = originalDefs.map((t) => ({
+      ...t,
+      coverage: t.coverage.filter((c) => c !== TARGET_ROUTE),
+    }));
+
+    const missing = findMissing(
+      realEndpoints(),
+      claimedEndpoints(tamperedDefs),
+    );
+
+    expect(missing.map((m) => m.raw)).toEqual([TARGET_ROUTE]);
   });
 });
