@@ -17,6 +17,7 @@ import { ghostwriterTools } from "./tools/ghostwriter";
 import { jobsTools } from "./tools/jobs";
 import { pipelineTools } from "./tools/pipeline";
 import { profileSettingsTools } from "./tools/profile-settings";
+import { watchlistTools } from "./tools/watchlist";
 
 /**
  * `McpServer#registerTool` is generic over `InputArgs extends undefined |
@@ -137,6 +138,7 @@ export function getAllToolDefs(): ToolDef[] {
     ...ghostwriterTools,
     ...designResumeTools,
     ...profileSettingsTools,
+    ...watchlistTools,
   ];
 }
 

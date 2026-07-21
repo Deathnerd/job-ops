@@ -222,6 +222,19 @@ describe("getAllToolDefs", () => {
       ]),
     );
   });
+
+  it("includes every watchlist domain tool", () => {
+    const names = getAllToolDefs().map((def) => def.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "jobops_watchlist_sources",
+        "jobops_watchlist_check",
+        "jobops_watchlist_jobs",
+        "jobops_manual_job_create",
+        "jobops_manual_job_infer",
+      ]),
+    );
+  });
 });
 
 describe("registerAllTools", () => {
