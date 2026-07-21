@@ -183,6 +183,7 @@ describe("getAllToolDefs", () => {
         "jobops_pipeline_presets",
         "jobops_pipeline_search_plan",
         "jobops_pipeline_history",
+        "jobops_pipeline_location",
       ]),
     );
   });

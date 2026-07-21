@@ -442,4 +442,55 @@ export const pipelineTools: ToolDef[] = [
       return selfCall(ctx, "GET", "/api/pipeline/runs");
     },
   },
+  {
+    name: "jobops_pipeline_location",
+    description:
+      "Resolve geographic context for proximity search: the country at a map point, or a preview of place names within a radius. Pure lookups, no state changes. Wraps POST /api/pipeline/location-country and POST /api/pipeline/location-area-preview.",
+    readOnly: true,
+    coverage: [
+      "POST /api/pipeline/location-country",
+      "POST /api/pipeline/location-area-preview",
+    ],
+    inputSchema: {
+      action: z
+        .enum(["country", "area_preview"])
+        .describe(
+          '"country" resolves the country at the point; "area_preview" lists nearby place names within radiusMiles',
+        ),
+      latitude: z
+        .number()
+        .min(-90)
+        .max(90)
+        .describe("Latitude of the map point (-90 to 90)"),
+      longitude: z
+        .number()
+        .min(-180)
+        .max(180)
+        .describe("Longitude of the map point (-180 to 180)"),
+      radiusMiles: z
+        .number()
+        .int()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe(
+          'Search radius in miles, 1-200 (required for "area_preview")',
+        ),
+    },
+    handler: (args, ctx) => {
+      const point = { latitude: args.latitude, longitude: args.longitude };
+      if (args.action === "area_preview") {
+        const radiusMiles = requireField<number>(
+          args,
+          "radiusMiles",
+          "area_preview",
+        );
+        return selfCall(ctx, "POST", "/api/pipeline/location-area-preview", {
+          ...point,
+          radiusMiles,
+        });
+      }
+      return selfCall(ctx, "POST", "/api/pipeline/location-country", point);
+    },
+  },
 ];
