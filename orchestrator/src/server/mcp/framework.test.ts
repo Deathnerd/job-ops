@@ -218,7 +218,7 @@ describe("getAllToolDefs", () => {
         "jobops_profile_projects",
         "jobops_settings_get",
         "jobops_settings_set",
-        "jobops_codex_auth_status",
+        "jobops_codex_auth",
       ]),
     );
   });

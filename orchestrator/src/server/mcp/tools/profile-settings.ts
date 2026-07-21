@@ -4,8 +4,8 @@
  * `/api/settings` (`orchestrator/src/server/api/routes/settings.ts`) via
  * `selfCall`.
  *
- * Route -> tool grouping (12 routes total across both files; 10 covered, 2
- * excluded):
+ * Route -> tool grouping (12 routes total across both files, all 12
+ * covered):
  *
  * profile.ts (4 routes, all covered):
  *  - `jobops_profile_get` -- `GET /api/profile`, `GET /api/profile/status`,
@@ -22,7 +22,7 @@
  *    worth its own `readOnly: true` annotation without the "refresh"
  *    action dragging it down.
  *
- * settings.ts (8 routes; 6 covered, 2 excluded):
+ * settings.ts (8 routes, all covered):
  *  - `jobops_settings_get` -- `GET /api/settings`, `POST
  *    /api/settings/llm-models`, `GET /api/settings/rx-resumes`, `GET
  *    /api/settings/rx-resumes/:id/projects`. All four are non-persisting
@@ -31,7 +31,7 @@
  *    nothing to storage -- so the whole tool is `readOnly: true`.
  *  - `jobops_settings_set` -- `PATCH /api/settings` only. The route's body
  *    schema (`updateSettingsSchema`, `shared/src/settings-schema.ts`) is
- *    generated dynamically from `settingsRegistry`'s 60+ heterogeneous
+ *    generated dynamically from `settingsRegistry`'s 64 heterogeneous
  *    entries (plain strings, numbers, enums, arrays, nested objects, and
  *    write-only secrets). Rather than hand-duplicating every field here
  *    (drift-prone busywork against a source that is already the single
@@ -44,20 +44,20 @@
  *    (see jobs.ts/design-resume.ts): full fidelity with the real route
  *    schema by construction, forever, instead of a second copy that can
  *    silently drift when the registry grows.
- *  - `jobops_codex_auth_status` -- `GET /api/settings/codex-auth` only,
- *    `readOnly: true`.
- *  - EXCLUDED, category "auth-bootstrap": `POST
- *    /api/settings/codex-auth/start` and `POST
- *    /api/settings/codex-auth/disconnect`. Both drive an in-process OAuth
- *    device-auth session -- "start" spawns a `codex login --device-auth`
- *    subprocess and returns a verification URL + user code that a human
- *    must complete out-of-band in a browser (an MCP tool call can trigger
- *    it but cannot usefully finish it); "disconnect" spawns `codex
- *    logout`, tearing down that same session/credential state. The task
- *    brief's target shape names only the read-side
- *    `jobops_codex_auth_status` tool, matching this call: sign-in/sign-out
- *    stays on the JobOps web UI's Settings page, and only the
- *    headlessly-useful status check is exposed here.
+ *  - `jobops_codex_auth` -- `GET /api/settings/codex-auth` (action
+ *    "status", default), `POST /api/settings/codex-auth/start` (action
+ *    "start"), and `POST /api/settings/codex-auth/disconnect` (action
+ *    "disconnect"). "start" is a real, useful headless operation despite
+ *    driving an interactive OAuth device-code flow: it blocks until the
+ *    underlying `codex login --device-auth` subprocess reports a
+ *    verification URL + one-time user code (or fails), which is exactly
+ *    the payload an agent needs to relay to a human to complete out-of-
+ *    band in a browser -- the agent then polls "status" for
+ *    `authenticated: true`. "disconnect" is NOT an interactive flow at
+ *    all -- it's a synchronous `codex logout` subprocess call that
+ *    revokes the stored Codex credentials, so this tool is marked
+ *    `destructive: true`; the whole tool is not `readOnly` (two of its
+ *    three actions mutate).
  *
  * SECURITY: every route wrapped here is already redacted at the source,
  * before this file ever sees a response.
@@ -71,9 +71,11 @@
  *    computed by `getEnvSettingsData`
  *    (`orchestrator/src/server/services/envSettings.ts`). There is no
  *    action on `jobops_settings_get` that can produce the full secret.
- *  - `jobops_codex_auth_status` (`GET /api/settings/codex-auth`) returns
- *    only `authenticated` (boolean), `username`, and status/message
- *    strings -- never a token or session credential.
+ *  - `jobops_codex_auth` (all three actions -- `status`/`start`/
+ *    `disconnect` all resolve to the same `CodexDeviceAuthSnapshot` shape)
+ *    returns only `authenticated` (boolean), `username`, and status/flow/
+ *    message strings -- never a token or session credential, in any
+ *    action.
  *  - `jobops_settings_set` (`PATCH /api/settings`) is write-only for
  *    secrets: its response is `getEffectiveSettings()`, subject to the
  *    same redaction above, so even the tool call that just wrote a secret
@@ -372,12 +374,44 @@ export const profileSettingsTools: ToolDef[] = [
       selfCall(ctx, "PATCH", "/api/settings", omitUndefined(args)),
   },
   {
-    name: "jobops_codex_auth_status",
+    name: "jobops_codex_auth",
     description:
-      "Check whether Codex CLI sign-in is currently authenticated, including any in-progress device-auth flow status. Wraps GET /api/settings/codex-auth. Returns only a boolean, an optional username, and human-readable status/flow fields -- never a token. Starting or disconnecting the Codex sign-in flow (POST /api/settings/codex-auth/start, POST /api/settings/codex-auth/disconnect) is intentionally NOT exposed here: both drive an interactive OAuth device-code flow that requires a human to complete a verification step out-of-band in a browser, which a headless MCP tool call cannot usefully do -- use the JobOps web UI's Settings page to sign in or out of Codex.",
-    readOnly: true,
-    coverage: ["GET /api/settings/codex-auth"],
-    inputSchema: {},
-    handler: (_args, ctx) => selfCall(ctx, "GET", "/api/settings/codex-auth"),
+      'Check Codex CLI sign-in status, start (or force-restart) the interactive device-auth sign-in flow, or disconnect (revoke) Codex credentials. Wraps GET /api/settings/codex-auth, POST /api/settings/codex-auth/start, and POST /api/settings/codex-auth/disconnect. "start" blocks until the underlying `codex login --device-auth` subprocess reports a verification URL and one-time user code (or fails) -- relay the returned verificationUrl/userCode to a human to complete out-of-band in a browser, then poll with action "status" until authenticated flips true. "disconnect" is a synchronous `codex logout` call that revokes the stored Codex credentials. Every action returns only a boolean, an optional username, and human-readable status/flow fields -- never a token.',
+    destructive: true,
+    coverage: [
+      "GET /api/settings/codex-auth",
+      "POST /api/settings/codex-auth/start",
+      "POST /api/settings/codex-auth/disconnect",
+    ],
+    inputSchema: {
+      action: z
+        .enum(["status", "start", "disconnect"])
+        .optional()
+        .describe(
+          '"status" (default) checks current Codex CLI sign-in status; "start" begins (or, with forceRestart, restarts) the interactive device-auth sign-in flow and blocks until a verification URL + one-time user code are available or the attempt fails; "disconnect" revokes the stored Codex credentials via `codex logout`',
+        ),
+      forceRestart: z
+        .boolean()
+        .optional()
+        .describe(
+          'Cancel and restart an in-progress device-auth session instead of returning its existing state ("start" only)',
+        ),
+    },
+    handler: (args, ctx) => {
+      const action = (args.action as string | undefined) ?? "status";
+      if (action === "start") {
+        const body = omitUndefined({ forceRestart: args.forceRestart });
+        return selfCall(
+          ctx,
+          "POST",
+          "/api/settings/codex-auth/start",
+          Object.keys(body).length > 0 ? body : undefined,
+        );
+      }
+      if (action === "disconnect") {
+        return selfCall(ctx, "POST", "/api/settings/codex-auth/disconnect");
+      }
+      return selfCall(ctx, "GET", "/api/settings/codex-auth");
+    },
   },
 ];

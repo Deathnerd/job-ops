@@ -1,6 +1,48 @@
 import type { Server } from "node:http";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Codex sign-in (status/start/disconnect) shells out to the real `codex`
+// CLI as a subprocess -- non-deterministic and CI-unsafe to exercise for
+// real. Mock at the same module boundary
+// `settings.codex-auth.test.ts` (the route-level test for this exact
+// surface) already uses, rather than mocking node:child_process directly.
+const {
+  startCodexDeviceAuthMock,
+  consumeCompletedCodexDeviceAuthMock,
+  disconnectCodexAuthMock,
+  getCodexDeviceAuthSnapshotMock,
+  resetCodexSessionMock,
+  validateCredentialsMock,
+} = vi.hoisted(() => ({
+  startCodexDeviceAuthMock: vi.fn(),
+  consumeCompletedCodexDeviceAuthMock: vi.fn(),
+  disconnectCodexAuthMock: vi.fn(),
+  getCodexDeviceAuthSnapshotMock: vi.fn(),
+  resetCodexSessionMock: vi.fn(),
+  validateCredentialsMock: vi.fn(),
+}));
+
+vi.mock("@server/services/llm/codex/client", () => ({
+  resetCodexSession: resetCodexSessionMock,
+}));
+
+vi.mock("@server/services/llm/codex/login", () => ({
+  startCodexDeviceAuth: startCodexDeviceAuthMock,
+  consumeCompletedCodexDeviceAuth: consumeCompletedCodexDeviceAuthMock,
+  disconnectCodexAuth: disconnectCodexAuthMock,
+  getCodexDeviceAuthSnapshot: getCodexDeviceAuthSnapshotMock,
+}));
+
+vi.mock("@server/services/llm/service", () => ({
+  LlmService: vi.fn(function MockLlmService() {
+    return {
+      validateCredentials: validateCredentialsMock,
+      listModels: vi.fn().mockResolvedValue([]),
+    };
+  }),
+}));
+
 import { startServer, stopServer } from "@server/api/routes/test-utils";
-import { afterEach, describe, expect, it } from "vitest";
 
 const MCP_ACCEPT_HEADER = "application/json, text/event-stream";
 
@@ -9,7 +51,7 @@ const PROFILE_SETTINGS_TOOL_NAMES = [
   "jobops_profile_projects",
   "jobops_settings_get",
   "jobops_settings_set",
-  "jobops_codex_auth_status",
+  "jobops_codex_auth",
 ];
 
 async function readMcpJsonRpc(res: Response): Promise<any> {
@@ -53,6 +95,27 @@ describe.sequential("profile-settings domain MCP tools", () => {
   let closeDb: () => void;
   let tempDir: string;
   let apiKey: string;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getCodexDeviceAuthSnapshotMock.mockReturnValue({
+      status: "idle",
+      loginInProgress: false,
+      verificationUrl: null,
+      userCode: null,
+      startedAt: null,
+      expiresAt: null,
+      message: null,
+    });
+    validateCredentialsMock.mockResolvedValue({
+      valid: false,
+      message: "Codex not authenticated",
+    });
+    startCodexDeviceAuthMock.mockResolvedValue(undefined);
+    consumeCompletedCodexDeviceAuthMock.mockReturnValue(null);
+    disconnectCodexAuthMock.mockResolvedValue(undefined);
+    resetCodexSessionMock.mockResolvedValue(undefined);
+  });
 
   afterEach(async () => {
     await stopServer({ server, closeDb, tempDir });
@@ -132,18 +195,36 @@ describe.sequential("profile-settings domain MCP tools", () => {
       name: string;
       annotations?: { readOnlyHint?: boolean };
     }>;
-    for (const name of [
-      "jobops_profile_projects",
-      "jobops_settings_get",
-      "jobops_codex_auth_status",
-    ]) {
+    for (const name of ["jobops_profile_projects", "jobops_settings_get"]) {
       const tool = tools.find((t) => t.name === name);
       expect(tool?.annotations?.readOnlyHint).toBe(true);
     }
-    for (const name of ["jobops_profile_get", "jobops_settings_set"]) {
+    for (const name of [
+      "jobops_profile_get",
+      "jobops_settings_set",
+      "jobops_codex_auth",
+    ]) {
       const tool = tools.find((t) => t.name === name);
       expect(tool?.annotations?.readOnlyHint).toBe(false);
     }
+  });
+
+  it("marks jobops_codex_auth destructive in tools/list annotations", async () => {
+    await boot();
+
+    const rpcResponse = await callMcp(baseUrl, apiKey, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+      params: {},
+    });
+
+    const tools = rpcResponse.result.tools as Array<{
+      name: string;
+      annotations?: { destructiveHint?: boolean };
+    }>;
+    const tool = tools.find((t) => t.name === "jobops_codex_auth");
+    expect(tool?.annotations?.destructiveHint).toBe(true);
   });
 
   it("calls jobops_profile_get end-to-end and gets the (mocked, empty) profile back", async () => {
@@ -243,23 +324,124 @@ describe.sequential("profile-settings domain MCP tools", () => {
     expect(getData.llmApiKeyHint).toBe(secretValue.slice(0, 4));
   });
 
-  it("calls jobops_codex_auth_status end-to-end without returning a token", async () => {
+  it('calls jobops_codex_auth action "status" (default) without returning a token', async () => {
     await boot();
 
     const rpcResponse = await callMcp(baseUrl, apiKey, {
       jsonrpc: "2.0",
       id: 8,
       method: "tools/call",
-      params: { name: "jobops_codex_auth_status", arguments: {} },
+      params: { name: "jobops_codex_auth", arguments: {} },
     });
 
     expect(rpcResponse.result.isError).toBeFalsy();
     const data = toolCallResultData(rpcResponse) as {
       authenticated: boolean;
+      flowStatus: string;
       username: string | null;
     };
-    expect(typeof data.authenticated).toBe("boolean");
+    expect(data.authenticated).toBe(false);
+    expect(data.flowStatus).toBe("idle");
     expect(data).not.toHaveProperty("token");
+  });
+
+  it('calls jobops_codex_auth action "start" and returns the device-auth flow\'s verification URL and user code', async () => {
+    await boot();
+
+    const runningSnapshot = {
+      status: "running",
+      loginInProgress: true,
+      verificationUrl: "https://auth.openai.com/codex/device",
+      userCode: "ABCD-EFGH",
+      startedAt: "2026-04-14T16:00:00.000Z",
+      expiresAt: "2026-04-14T16:15:00.000Z",
+      message: "Open the verification URL and enter the one-time code.",
+    };
+    startCodexDeviceAuthMock.mockResolvedValueOnce(runningSnapshot);
+    getCodexDeviceAuthSnapshotMock.mockReturnValueOnce(runningSnapshot);
+
+    const rpcResponse = await callMcp(baseUrl, apiKey, {
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: {
+        name: "jobops_codex_auth",
+        arguments: { action: "start" },
+      },
+    });
+
+    expect(rpcResponse.result.isError).toBeFalsy();
+    const data = toolCallResultData(rpcResponse) as {
+      flowStatus: string;
+      verificationUrl: string | null;
+      userCode: string | null;
+    };
+    expect(data.flowStatus).toBe("running");
+    expect(data.verificationUrl).toBe("https://auth.openai.com/codex/device");
+    expect(data.userCode).toBe("ABCD-EFGH");
+    expect(data).not.toHaveProperty("token");
+    expect(startCodexDeviceAuthMock).toHaveBeenCalledWith(false);
+  });
+
+  it('jobops_codex_auth action "start" passes forceRestart through', async () => {
+    await boot();
+
+    const rpcResponse = await callMcp(baseUrl, apiKey, {
+      jsonrpc: "2.0",
+      id: 10,
+      method: "tools/call",
+      params: {
+        name: "jobops_codex_auth",
+        arguments: { action: "start", forceRestart: true },
+      },
+    });
+
+    expect(rpcResponse.result.isError).toBeFalsy();
+    expect(startCodexDeviceAuthMock).toHaveBeenCalledWith(true);
+  });
+
+  it('jobops_codex_auth action "start" surfaces a descriptive error when the login flow fails', async () => {
+    await boot();
+
+    startCodexDeviceAuthMock.mockRejectedValueOnce(
+      new Error("Codex CLI is not installed in this runtime."),
+    );
+
+    const rpcResponse = await callMcp(baseUrl, apiKey, {
+      jsonrpc: "2.0",
+      id: 11,
+      method: "tools/call",
+      params: {
+        name: "jobops_codex_auth",
+        arguments: { action: "start" },
+      },
+    });
+
+    expect(rpcResponse.result.isError).toBe(true);
+    expect(rpcResponse.result.content[0].text).toContain(
+      "Codex CLI is not installed in this runtime.",
+    );
+  });
+
+  it('calls jobops_codex_auth action "disconnect" and revokes codex credentials', async () => {
+    await boot();
+
+    const rpcResponse = await callMcp(baseUrl, apiKey, {
+      jsonrpc: "2.0",
+      id: 12,
+      method: "tools/call",
+      params: {
+        name: "jobops_codex_auth",
+        arguments: { action: "disconnect" },
+      },
+    });
+
+    expect(rpcResponse.result.isError).toBeFalsy();
+    const data = toolCallResultData(rpcResponse) as { authenticated: boolean };
+    expect(data.authenticated).toBe(false);
+    expect(data).not.toHaveProperty("token");
+    expect(disconnectCodexAuthMock).toHaveBeenCalledOnce();
+    expect(resetCodexSessionMock).toHaveBeenCalledOnce();
   });
 
   it("jobops_settings_get rx_resume_projects requires resumeId", async () => {
