@@ -140,11 +140,13 @@ describe.sequential("pipeline domain MCP tools", () => {
     }
 
     // The search-plan generator never touches stored presets -- it must not
-    // inherit the presets tool's destructive flag.
+    // inherit the presets tool's destructive flag, and it is itself
+    // stateless (does not read or write any stored preset).
     const searchPlan = tools.find(
       (t) => t.name === "jobops_pipeline_search_plan",
     );
     expect(searchPlan?.annotations?.destructiveHint).toBe(false);
+    expect(searchPlan?.annotations?.readOnlyHint).toBe(true);
   });
 
   it("calls jobops_pipeline_status end-to-end and gets the idle status back", async () => {

@@ -24,48 +24,67 @@ function extractBearerKey(req: express.Request): string {
     : "";
 }
 
+/**
+ * Resolves the bearer context from headers only (no body access needed) and
+ * either stashes it on `res.locals` for the downstream handler or 401s
+ * immediately. Runs BEFORE the JSON body parser so unauthenticated callers
+ * never pay for body parsing.
+ */
+async function authMiddleware(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+): Promise<void> {
+  const ctx = await resolveBearerContext(req);
+  if (!ctx) {
+    res.status(401).json({
+      jsonrpc: "2.0",
+      error: { code: -32001, message: "Unauthorized" },
+      id: null,
+    });
+    return;
+  }
+  res.locals.mcpBearerContext = ctx;
+  next();
+}
+
 export function mountMcp(app: express.Express): void {
   if (process.env.JOBOPS_MCP_ENABLED !== "true") return;
 
-  app.post("/mcp", express.json({ limit: "4mb" }), async (req, res) => {
-    const ctx = await resolveBearerContext(req);
-    if (!ctx) {
-      res.status(401).json({
-        jsonrpc: "2.0",
-        error: { code: -32001, message: "Unauthorized" },
-        id: null,
-      });
-      return;
-    }
-
-    try {
-      const server = new McpServer({ name: "jobops", version: "1.0.0" });
-      registerAllTools(server, {
-        bearerKey: extractBearerKey(req),
-        baseUrl: `http://localhost:${process.env.PORT || 3001}`,
-      });
-
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
-      });
-      res.on("close", () => {
-        void transport.close().catch(() => {});
-        void server.close().catch(() => {});
-      });
-
-      await server.connect(transport);
-      await transport.handleRequest(req, res, req.body);
-    } catch (error) {
-      logger.error("MCP request handler failed", { error });
-      if (!res.headersSent) {
-        res.status(500).json({
-          jsonrpc: "2.0",
-          error: { code: -32603, message: "Internal error" },
-          id: null,
+  app.post(
+    "/mcp",
+    authMiddleware,
+    express.json({ limit: "4mb" }),
+    async (req, res) => {
+      try {
+        const server = new McpServer({ name: "jobops", version: "1.0.0" });
+        registerAllTools(server, {
+          bearerKey: extractBearerKey(req),
+          baseUrl: `http://localhost:${process.env.PORT || 3001}`,
         });
+
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined,
+        });
+        res.on("close", () => {
+          void transport.close().catch(() => {});
+          void server.close().catch(() => {});
+        });
+
+        await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+      } catch (error) {
+        logger.error("MCP request handler failed", { error });
+        if (!res.headersSent) {
+          res.status(500).json({
+            jsonrpc: "2.0",
+            error: { code: -32603, message: "Internal error" },
+            id: null,
+          });
+        }
       }
-    }
-  });
+    },
+  );
 
   app.get("/mcp", (_req, res) => res.status(405).end());
   app.delete("/mcp", (_req, res) => res.status(405).end());

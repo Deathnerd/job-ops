@@ -385,6 +385,7 @@ export const pipelineTools: ToolDef[] = [
     name: "jobops_pipeline_search_plan",
     description:
       "Generate a suggested search configuration from a natural-language prompt and the current configuration. Wraps POST /api/pipeline/search-plan. Stateless -- does not read or write any stored preset.",
+    readOnly: true,
     coverage: ["POST /api/pipeline/search-plan"],
     inputSchema: {
       prompt: z

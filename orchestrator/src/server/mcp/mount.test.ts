@@ -66,6 +66,45 @@ describe.sequential("MCP mount", () => {
     expect(body.id).toBeNull();
   });
 
+  it("401s (not 413) on an unauthenticated request whose body exceeds the JSON parser's 4mb limit, proving auth runs before body parsing", async () => {
+    ({ server, baseUrl, closeDb, tempDir } = await startServer({
+      env: {
+        JOBOPS_MCP_ENABLED: "true",
+        JOBOPS_TEST_AUTH_BYPASS: "0",
+      },
+    }));
+
+    // 5mb of padding, well past express.json's 4mb limit. If auth ran after
+    // the body parser, this would 413 before ever reaching the auth check.
+    const oversizedBody = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "test", version: "0" },
+        padding: "x".repeat(5 * 1024 * 1024),
+      },
+    });
+
+    const res = await fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: MCP_ACCEPT_HEADER,
+      },
+      body: oversizedBody,
+    });
+
+    expect(res.status).toBe(401);
+    expect(res.status).not.toBe(413);
+    const body = await res.json();
+    expect(body.jsonrpc).toBe("2.0");
+    expect(body.error.code).toBe(-32001);
+    expect(body.id).toBeNull();
+  });
+
   it("answers initialize with a valid API key", async () => {
     ({ server, baseUrl, closeDb, tempDir } = await startServer({
       env: {
