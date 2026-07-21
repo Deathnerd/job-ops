@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- CI: GHCR workflow now builds on every push to `main` (`:main` + `:sha-<short>` tags) in addition to version tags; `:latest` moves only on tags; arm64 dropped (amd64-only deployment target).
+
 - Dev dependency: `@colbymchenry/codegraph` 1.4.1 (exact pin), backing the repo's committed `.mcp.json` codegraph MCP server. Local SQLite index, telemetry disabled machine-side.
 
 - Root `overrides` pins knip's `typescript` peer to the workspace version so older npm releases (as in the Docker build image) install cleanly under TS7.
