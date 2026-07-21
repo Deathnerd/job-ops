@@ -5,10 +5,15 @@
  * `post-application-review.ts`) and `/api/workday`
  * (`orchestrator/src/server/api/routes/workday.ts`) via `selfCall`.
  *
- * Route -> tool grouping (12 routes total across the three files, 11
- * covered, 1 excluded):
+ * Route -> tool grouping (15 logical actions total across the three files,
+ * 14 covered, 1 excluded -- counted at coverage-string granularity: the
+ * generic `POST /providers/:provider/actions/:action` dispatcher is 1
+ * physical route but 4 logical actions (connect/status/sync/disconnect),
+ * each listed separately in the `coverage` arrays below):
  *
- * post-application-providers.ts (3 routes, all covered):
+ * post-application-providers.ts (6 logical actions: 2 dedicated OAuth
+ * routes + 4 sub-actions of the generic dispatcher route; 5 covered, 1
+ * excluded):
  *  - `jobops_postapp_providers` -- `GET /api/post-application/providers/gmail/oauth/start`
  *    (action "oauth_start"), `POST
  *    /api/post-application/providers/gmail/oauth/exchange` (action

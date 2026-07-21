@@ -242,6 +242,87 @@ describe.sequential("post-application/workday domain MCP tools", () => {
     expect(data.state.length).toBeGreaterThan(0);
   });
 
+  it("round-trips jobops_postapp_providers oauth_exchange without ever leaking the tokens Google returns", async () => {
+    await boot();
+
+    const startResponse = await callMcp(baseUrl, apiKey, {
+      jsonrpc: "2.0",
+      id: 100,
+      method: "tools/call",
+      params: {
+        name: "jobops_postapp_providers",
+        arguments: { action: "oauth_start" },
+      },
+    });
+    expect(startResponse.result.isError).toBeFalsy();
+    const { state } = toolCallResultData(startResponse) as { state: string };
+
+    // The exchange route makes two real outbound calls to Google
+    // (token exchange, then a profile lookup using the returned access
+    // token) before ever touching our own selfCall loopback -- pass
+    // loopback (http://) traffic straight through to the real network and
+    // intercept only those two https:// Google endpoints, same technique
+    // the fetch_logo test uses for the Workday upstream call.
+    const secretRefreshToken = "1//mcp-test-oauth-exchange-refresh-do-not-leak";
+    const secretAccessToken = "ya29.mcp-test-oauth-exchange-access-do-not-leak";
+    const nativeFetch = globalThis.fetch;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("http://")) {
+        return nativeFetch(input, init);
+      }
+      if (url === "https://oauth2.googleapis.com/token") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              refresh_token: secretRefreshToken,
+              access_token: secretAccessToken,
+              expires_in: 3600,
+              scope: "https://www.googleapis.com/auth/gmail.readonly",
+              token_type: "Bearer",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      if (url === "https://www.googleapis.com/oauth2/v2/userinfo") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ email: "me@example.com", name: "Test User" }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.reject(new Error(`Unexpected external fetch: ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const exchangeResponse = await callMcp(baseUrl, apiKey, {
+      jsonrpc: "2.0",
+      id: 101,
+      method: "tools/call",
+      params: {
+        name: "jobops_postapp_providers",
+        arguments: { action: "oauth_exchange", state, code: "fake-auth-code" },
+      },
+    });
+
+    expect(exchangeResponse.result.isError).toBeFalsy();
+    const fullResponseJson = JSON.stringify(exchangeResponse);
+    expect(fullResponseJson).not.toContain(secretRefreshToken);
+    expect(fullResponseJson).not.toContain(secretAccessToken);
+    const exchangeData = toolCallResultData(exchangeResponse) as {
+      status: {
+        connected: boolean;
+        integration: { credentials: { hasRefreshToken: boolean } };
+      };
+    };
+    expect(exchangeData.status.connected).toBe(true);
+    expect(exchangeData.status.integration.credentials.hasRefreshToken).toBe(
+      true,
+    );
+  });
+
   it("round-trips jobops_postapp_providers connect+status without ever leaking the refresh token", async () => {
     await boot();
 
