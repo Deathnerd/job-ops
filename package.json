@@ -27,6 +27,7 @@
     "knip": "knip"
   },
   "devDependencies": {
+    "@colbymchenry/codegraph": "1.4.1",
     "@types/node": "^25.2.3",
     "knip": "^5.83.1",
     "tsx": "^4.19.2",
