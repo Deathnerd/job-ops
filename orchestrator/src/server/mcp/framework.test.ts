@@ -235,6 +235,18 @@ describe("getAllToolDefs", () => {
       ]),
     );
   });
+
+  it("includes every post-application/workday domain tool", () => {
+    const names = getAllToolDefs().map((def) => def.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "jobops_postapp_providers",
+        "jobops_postapp_sync",
+        "jobops_postapp_review",
+        "jobops_workday_import",
+      ]),
+    );
+  });
 });
 
 describe("registerAllTools", () => {

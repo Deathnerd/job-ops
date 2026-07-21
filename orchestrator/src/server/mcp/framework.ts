@@ -16,6 +16,7 @@ import { designResumeTools } from "./tools/design-resume";
 import { ghostwriterTools } from "./tools/ghostwriter";
 import { jobsTools } from "./tools/jobs";
 import { pipelineTools } from "./tools/pipeline";
+import { postApplicationTools } from "./tools/post-application";
 import { profileSettingsTools } from "./tools/profile-settings";
 import { watchlistTools } from "./tools/watchlist";
 
@@ -139,6 +140,7 @@ export function getAllToolDefs(): ToolDef[] {
     ...designResumeTools,
     ...profileSettingsTools,
     ...watchlistTools,
+    ...postApplicationTools,
   ];
 }
 
