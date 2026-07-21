@@ -7,9 +7,7 @@
     "experimentalDecorators": true,
     "forceConsistentCasingInFileNames": true,
     "importHelpers": true,
-    "lib": [
-      "DOM"
-    ],
+    "lib": ["DOM"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "newLine": "lf",
@@ -29,13 +27,9 @@
     "useDefineForClassFields": true,
     "skipLibCheck": true,
     "paths": {
-      "@shared/*": [
-        "../../shared/src/*"
-      ]
+      "@shared/*": ["../../shared/src/*"]
     },
     "noEmit": true
   },
-  "include": [
-    "./src/**/*"
-  ]
+  "include": ["./src/**/*"]
 }
