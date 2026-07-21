@@ -209,6 +209,19 @@ describe("getAllToolDefs", () => {
       ]),
     );
   });
+
+  it("includes every profile-settings domain tool", () => {
+    const names = getAllToolDefs().map((def) => def.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "jobops_profile_get",
+        "jobops_profile_projects",
+        "jobops_settings_get",
+        "jobops_settings_set",
+        "jobops_codex_auth_status",
+      ]),
+    );
+  });
 });
 
 describe("registerAllTools", () => {
