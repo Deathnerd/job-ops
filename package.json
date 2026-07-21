@@ -34,5 +34,10 @@
   },
   "volta": {
     "node": "22.22.1"
+  },
+  "overrides": {
+    "knip": {
+      "typescript": "$typescript"
+    }
   }
 }

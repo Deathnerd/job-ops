@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Root `overrides` pins knip's `typescript` peer to the workspace version so older npm releases (as in the Docker build image) install cleanly under TS7.
+
 - TypeScript upgraded to 7.0 (native compiler) in the five type-check workspaces; tsconfigs migrated off removed options (`baseUrl`, `importsNotUsedAsValues`).
 
 ### Fixed
