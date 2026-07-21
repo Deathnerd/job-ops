@@ -15,6 +15,7 @@ import type { z } from "zod";
 import { designResumeTools } from "./tools/design-resume";
 import { ghostwriterTools } from "./tools/ghostwriter";
 import { jobsTools } from "./tools/jobs";
+import { miscTools } from "./tools/misc";
 import { pipelineTools } from "./tools/pipeline";
 import { postApplicationTools } from "./tools/post-application";
 import { profileSettingsTools } from "./tools/profile-settings";
@@ -141,6 +142,7 @@ export function getAllToolDefs(): ToolDef[] {
     ...profileSettingsTools,
     ...watchlistTools,
     ...postApplicationTools,
+    ...miscTools,
   ];
 }
 

@@ -247,6 +247,24 @@ describe("getAllToolDefs", () => {
       ]),
     );
   });
+
+  it("includes every misc domain tool", () => {
+    const names = getAllToolDefs().map((def) => def.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "jobops_app_status",
+        "jobops_visa_sponsors_search",
+        "jobops_tracer_links",
+        "jobops_backups",
+        "jobops_workspaces",
+        "jobops_whoami",
+        "jobops_api_keys",
+        "jobops_database_clear",
+        "jobops_onboarding_status",
+        "jobops_onboarding_actions",
+      ]),
+    );
+  });
 });
 
 describe("registerAllTools", () => {
