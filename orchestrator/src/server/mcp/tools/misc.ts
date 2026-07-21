@@ -82,11 +82,11 @@
  *    beyond a single assertion against the create response.
  *  - `jobops_database_clear` -- `DELETE /api/database` only, from
  *    `database.ts`. `destructive: true` (deletes every job and pipeline
- *    run). CONCERN (not fixed here, out of this task's scope): unlike
- *    `backup.ts` and `workspaces.ts`, this route has no `isSystemAdmin()`
- *    gate at all -- any authenticated user/API key can wipe the entire
- *    database. Flagged in the task report; not a route-behavior change this
- *    sweep is authorized to make.
+ *    run). FOLLOW-UP FIX (post-8g): this route originally had no
+ *    `isSystemAdmin()` gate at all, unlike every other admin-sensitive route
+ *    in this sweep -- fixed by adding the same `requireSystemAdmin` gate
+ *    `backup.ts` uses (403 `FORBIDDEN` for non-admins); the tool description
+ *    now says so.
  *  - `jobops_onboarding_status` -- `GET /api/onboarding/status` only, from
  *    `onboarding.ts`. `readOnly: true`.
  *  - `jobops_onboarding_actions` -- the remaining 9 routes in
@@ -625,7 +625,7 @@ export const miscTools: ToolDef[] = [
   {
     name: "jobops_database_clear",
     description:
-      "Permanently delete every job and pipeline run from the database. Wraps DELETE /api/database. There is no undo short of restoring an earlier backup (see jobops_backups) -- use with extreme caution.",
+      "Permanently delete every job and pipeline run from the database. Wraps DELETE /api/database. Requires a system-admin account or API key -- the route returns 403 for non-admin callers. There is no undo short of restoring an earlier backup (see jobops_backups) -- use with extreme caution.",
     destructive: true,
     coverage: ["DELETE /api/database"],
     inputSchema: {},
