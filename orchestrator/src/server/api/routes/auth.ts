@@ -2,14 +2,17 @@ import {
   badRequest,
   conflict,
   forbidden,
+  notFound,
   serviceUnavailable,
   unauthorized,
 } from "@infra/errors";
 import { asyncRoute, fail, ok } from "@infra/http";
+import { getUserId } from "@infra/request-context";
 import { blacklistToken, signToken, verifyToken } from "@server/auth/jwt";
 import { verifyPassword } from "@server/auth/password";
 import { getJobOpsAppConfig } from "@server/config/app-mode";
 import { isDemoMode } from "@server/config/demo";
+import * as apiKeysRepo from "@server/repositories/api-keys";
 import { getOrCreateAnalyticsInstallState } from "@server/repositories/product-analytics";
 import * as usersRepo from "@server/repositories/users";
 import type { Request, Response } from "express";
@@ -24,6 +27,10 @@ const loginSchema = z.object({
 const setupSchema = loginSchema.extend({
   password: z.string().min(8).max(500),
   displayName: z.string().trim().min(1).max(120).optional(),
+});
+
+const createApiKeySchema = z.object({
+  name: z.string().trim().min(1).max(64),
 });
 
 function isUsernameConflictError(error: unknown): boolean {
@@ -254,15 +261,17 @@ authRouter.post(
 
 authRouter.get(
   "/me",
-  asyncRoute(async (req: Request, res: Response) => {
-    const authHeader = req.headers.authorization || "";
-    if (!authHeader.startsWith("Bearer ")) {
+  asyncRoute(async (_req: Request, res: Response) => {
+    // The auth guard (app.ts) already verified the bearer credential -- JWT
+    // or API key -- and stashed the resolved identity in the request
+    // context. Read it from there instead of re-verifying the token as a
+    // JWT, so API-key-authenticated callers work the same as JWT callers.
+    const userId = getUserId();
+    if (!userId) {
       fail(res, unauthorized("Authentication required"));
       return;
     }
-    const token = authHeader.slice("Bearer ".length).trim();
-    const payload = await verifyToken(token);
-    const user = await usersRepo.getUserById(payload.userId);
+    const user = await usersRepo.getUserById(userId);
     if (!user || user.isDisabled) {
       fail(res, unauthorized("Authentication required"));
       return;
@@ -272,6 +281,72 @@ authRouter.get(
       user,
       analyticsDistinctId: installState.distinctId,
     });
+  }),
+);
+
+authRouter.get(
+  "/api-keys",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const userId = getUserId();
+    if (!userId) {
+      fail(res, unauthorized("Authentication required"));
+      return;
+    }
+    const keys = await apiKeysRepo.listApiKeys(userId);
+    ok(res, { keys });
+  }),
+);
+
+authRouter.post(
+  "/api-keys",
+  asyncRoute(async (req: Request, res: Response) => {
+    const userId = getUserId();
+    if (!userId) {
+      fail(res, unauthorized("Authentication required"));
+      return;
+    }
+
+    const parsed = createApiKeySchema.safeParse(req.body);
+    if (!parsed.success) {
+      fail(res, badRequest("Invalid request body", parsed.error.flatten()));
+      return;
+    }
+
+    const created = await apiKeysRepo.createApiKey({
+      userId,
+      name: parsed.data.name,
+    });
+    ok(
+      res,
+      {
+        id: created.id,
+        name: created.name,
+        createdAt: created.createdAt,
+        key: created.plaintextKey,
+      },
+      201,
+    );
+  }),
+);
+
+authRouter.post(
+  "/api-keys/:id/revoke",
+  asyncRoute(async (req: Request, res: Response) => {
+    const userId = getUserId();
+    if (!userId) {
+      fail(res, unauthorized("Authentication required"));
+      return;
+    }
+
+    const revoked = await apiKeysRepo.revokeApiKey({
+      userId,
+      id: req.params.id,
+    });
+    if (!revoked) {
+      fail(res, notFound("API key not found"));
+      return;
+    }
+    ok(res, { revoked: true });
   }),
 );
 

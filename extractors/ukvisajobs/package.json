@@ -14,7 +14,7 @@
   "devDependencies": {
     "@apify/tsconfig": "^0.1.0",
     "@types/node": "^24.0.0",
-    "typescript": "~5.9.0"
+    "typescript": "^7.0.2"
   },
   "optionalDependencies": {
     "impit-linux-x64-gnu": "^0.1.0"

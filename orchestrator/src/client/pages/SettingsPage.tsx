@@ -18,6 +18,7 @@ import {
   toRxResumeValidationPayload,
   validateAndMaybePersistRxResumeMode,
 } from "@client/lib/rxresume-config";
+import { ApiKeysCard } from "@client/pages/settings/components/ApiKeysCard";
 import { BackupSettingsSection } from "@client/pages/settings/components/BackupSettingsSection";
 import { ChatSettingsSection } from "@client/pages/settings/components/ChatSettingsSection";
 import { DangerZoneSection } from "@client/pages/settings/components/DangerZoneSection";
@@ -135,6 +136,7 @@ type SettingsSectionId =
   | "webhooks"
   | "tracer-links"
   | "environment"
+  | "api-keys"
   | "display"
   | "backup"
   | "danger-zone";
@@ -243,6 +245,12 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         description: "Service credentials and authentication protection.",
         searchTerms: ["security", "auth", "adzuna", "ukvisajobs"],
       },
+      {
+        id: "api-keys",
+        label: "API Keys",
+        description: "Create and revoke keys for programmatic access.",
+        searchTerms: ["api", "key", "token", "bearer", "mcp"],
+      },
     ],
   },
   {
@@ -333,6 +341,7 @@ const SECTION_FIELD_MAP: Record<
     "adzunaAppId",
     "adzunaAppKey",
   ],
+  "api-keys": [],
   display: [
     "showSponsorInfo",
     "renderMarkdownInJobDescriptions",
@@ -1656,6 +1665,9 @@ export const SettingsPage: React.FC = () => {
           layoutMode="panel"
         />
       );
+      break;
+    case "api-keys":
+      activeSectionContent = <ApiKeysCard layoutMode="panel" />;
       break;
     case "display":
       activeSectionContent = (
