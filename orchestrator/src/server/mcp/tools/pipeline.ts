@@ -150,7 +150,7 @@ export const pipelineTools: ToolDef[] = [
   {
     name: "jobops_pipeline_run",
     description:
-      'Start a new pipeline run, resume a run paused waiting for LLM configuration, or start the noVNC viewer for a pending Cloudflare challenge. Wraps POST /api/pipeline/run, POST /api/pipeline/resume-scoring, and POST /api/pipeline/challenge-viewer. Note: POST /api/pipeline/solve-challenge (the blocking human-solves-the-challenge endpoint) has no MCP equivalent -- use "start_challenge_viewer" to get the viewer URL and solve it there; the pipeline resumes automatically on success.',
+      'Start a new pipeline run (from inline config or a saved search preset via presetId/presetName), resume a run paused waiting for LLM configuration, or start the noVNC viewer for a pending Cloudflare challenge. Wraps POST /api/pipeline/run, POST /api/pipeline/resume-scoring, and POST /api/pipeline/challenge-viewer. Note: POST /api/pipeline/solve-challenge (the blocking human-solves-the-challenge endpoint) has no MCP equivalent -- use "start_challenge_viewer" to get the viewer URL and solve it there; the pipeline resumes automatically on success.',
     coverage: [
       "POST /api/pipeline/run",
       "POST /api/pipeline/resume-scoring",
@@ -162,6 +162,23 @@ export const pipelineTools: ToolDef[] = [
         .optional()
         .describe(
           '"run" (default) starts a new pipeline run; "resume_scoring" resumes a run paused waiting for LLM configuration; "start_challenge_viewer" starts the noVNC viewer session for a pending Cloudflare challenge and returns its URL',
+        ),
+      presetId: z
+        .string()
+        .trim()
+        .min(1)
+        .optional()
+        .describe(
+          'Saved search preset id to run: the preset config is the base and any inline fields override it (only used by "run"; mutually exclusive with presetName)',
+        ),
+      presetName: z
+        .string()
+        .trim()
+        .min(1)
+        .max(80)
+        .optional()
+        .describe(
+          'Saved search preset name to run: the preset config is the base and any inline fields override it (only used by "run"; mutually exclusive with presetId)',
         ),
       topN: z
         .number()
@@ -247,6 +264,8 @@ export const pipelineTools: ToolDef[] = [
       }
       if (action === "run") {
         const body = omitUndefined({
+          presetId: args.presetId,
+          presetName: args.presetName,
           topN: args.topN,
           minSuitabilityScore: args.minSuitabilityScore,
           sources: args.sources,

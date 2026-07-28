@@ -159,6 +159,27 @@ updates its counters live. **Exceptional matches** counts jobs with a
 suitability score above 90. Importing and processing continue in the background
 for now.
 
+### Run a saved search from the API
+
+`POST /api/pipeline/run` accepts a saved search preset reference instead of an inline config, so external schedulers (cron, k8s CronJobs, scripts) can trigger a stored search without embedding its configuration:
+
+```bash
+curl -X POST https://<your-jobops-host>/api/pipeline/run \
+  -H "Authorization: Bearer <api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"presetName":"Daily platform"}'
+```
+
+Behavior and constraints:
+
+- Pass `presetId` **or** `presetName` (not both — the request is rejected with `400 INVALID_REQUEST`).
+- The preset's stored config is the base; any inline fields in the same request (for example `topN`) override the preset's values for that run only.
+- An unknown preset returns `404 NOT_FOUND`. Presets are scoped to the authenticated user, so an API key only reaches its own account's saved searches.
+- Starting a run this way stamps the preset's `lastUsedAt`, the same as applying it in the UI.
+- The same fields are available on the `jobops_pipeline_run` MCP tool.
+
+Manage saved searches in the Run Search modal or via `GET`/`POST /api/pipeline/search-presets`.
+
 ### Manual tab
 
 Manual mode opens direct import flow in the same modal.

@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `POST /api/pipeline/run` accepts `presetId`/`presetName` to run a saved search preset: the preset's config is the base, explicitly-passed inline fields override it, and the preset's `lastUsedAt` is stamped on run start. Exposed through the `jobops_pipeline_run` MCP tool. Lets external schedulers (e.g. a k8s CronJob) trigger saved searches without embedding the search config.
+
 - MCP server at `POST /mcp` (Streamable HTTP, stateless), gated behind `JOBOPS_MCP_ENABLED` (default off). 47 consolidated tools cover every `/api/*` endpoint across jobs, pipeline, ghostwriter, design-resume, profile/settings, watchlist, post-application/workday, and misc domains; a router-walking contract test keeps coverage complete.
 - Per-user API keys (SHA-256 hashed at rest) accepted as bearer credentials alongside JWTs; management endpoints at `/api/auth/api-keys` and a Settings -> API Keys card. Keys work for plain REST calls as well as MCP.
 - Docs: `docs-site/docs/features/mcp-server.md`.

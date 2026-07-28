@@ -66,7 +66,7 @@ Replace `<your-host>` with your JobOps instance's URL and `<key>` with the API k
 Tools are grouped by the `/api/*` area they wrap, one tool file per domain, roughly one tool per route file with action-enum dispatch inside each:
 
 - **Jobs** (`jobops_jobs_list`, `jobops_job_get`, `jobops_job_update`, `jobops_job_notes`, `jobops_job_stages`, `jobops_job_documents`, `jobops_job_application`, `jobops_job_actions`, `jobops_jobs_maintenance`) -- list, read, update, and manage individual jobs: notes, stage transitions, documents/PDFs, application status, and bulk actions.
-- **Pipeline** (`jobops_pipeline_run`, `jobops_pipeline_status`, `jobops_pipeline_cancel`, `jobops_pipeline_presets`, `jobops_pipeline_search_plan`, `jobops_pipeline_history`) -- start/resume/cancel a search-and-score run, manage saved search presets, and read run history.
+- **Pipeline** (`jobops_pipeline_run`, `jobops_pipeline_status`, `jobops_pipeline_cancel`, `jobops_pipeline_presets`, `jobops_pipeline_search_plan`, `jobops_pipeline_history`) -- start/resume/cancel a search-and-score run (from inline config or a saved preset via `presetId`/`presetName`), manage saved search presets, and read run history.
 - **Ghostwriter** (`jobops_chat_threads`, `jobops_chat_send`, `jobops_chat_runs`) -- the per-job chat used to draft outreach and tailoring copy.
 - **Design Resume** (`jobops_resume_get`, `jobops_resume_update`, `jobops_resume_render`, `jobops_resume_assets`) -- read/edit the resume document, import from Reactive Resume, and render a PDF.
 - **Profile & Settings** (`jobops_profile_get`, `jobops_profile_projects`, `jobops_settings_get`, `jobops_settings_set`, `jobops_codex_auth`) -- the candidate profile used for scoring/tailoring and workspace-level settings.

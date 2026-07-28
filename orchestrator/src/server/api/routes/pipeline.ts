@@ -495,6 +495,11 @@ pipelineRouter.get(
  * POST /api/pipeline/run - Trigger the pipeline manually
  */
 const runPipelineSchema = z.object({
+  // Run from a saved search preset: the preset's config is the base and any
+  // explicitly-passed inline fields below override it. presetId and
+  // presetName are mutually exclusive.
+  presetId: z.string().trim().min(1).optional(),
+  presetName: z.string().trim().min(1).max(80).optional(),
   topN: z.number().min(1).max(50).optional(),
   minSuitabilityScore: z.number().min(0).max(100).optional(),
   sources: z.array(pipelineSourceSchema).min(1).optional(),
@@ -528,7 +533,36 @@ const runPipelineSchema = z.object({
 
 pipelineRouter.post("/run", async (req: Request, res: Response) => {
   try {
-    const config = runPipelineSchema.parse(req.body);
+    const { presetId, presetName, ...inline } = runPipelineSchema.parse(
+      req.body,
+    );
+    if (presetId !== undefined && presetName !== undefined) {
+      return fail(res, badRequest("Provide presetId or presetName, not both"));
+    }
+    let runPresetId: string | null = null;
+    let config = inline;
+    if (presetId !== undefined || presetName !== undefined) {
+      const preset =
+        presetId !== undefined
+          ? await pipelineSearchPresetsRepo.getPipelineSearchPreset(presetId)
+          : await pipelineSearchPresetsRepo.getPipelineSearchPresetByName(
+              presetName as string,
+            );
+      if (!preset) return fail(res, notFound("Saved search not found"));
+      runPresetId = preset.id;
+      // Preset config is the base; explicitly-passed inline fields override
+      // it. locationMode/automaticPresetId are UI-only attributes of the
+      // stored config with no meaning for a run.
+      const {
+        locationMode: _locationMode,
+        automaticPresetId: _automaticPresetId,
+        ...presetBase
+      } = preset.config;
+      const definedInline = Object.fromEntries(
+        Object.entries(inline).filter(([, value]) => value !== undefined),
+      ) as typeof inline;
+      config = { ...presetBase, ...definedInline };
+    }
     const locationIntent = createLocationIntent({
       selectedCountry: config.country,
       cityLocations: config.cityLocations,
@@ -633,6 +667,18 @@ pipelineRouter.post("/run", async (req: Request, res: Response) => {
         logger.error("Background pipeline run failed", error);
       });
     });
+    if (runPresetId) {
+      const usedPresetId = runPresetId;
+      void pipelineSearchPresetsRepo
+        .markPipelineSearchPresetUsed(usedPresetId)
+        .catch((error) => {
+          logger.warn("Failed to mark saved search as used after run start", {
+            route: "/api/pipeline/run",
+            presetId: usedPresetId,
+            error,
+          });
+        });
+    }
     void trackCanonicalActivationEvent(
       "jobs_pipeline_run_started",
       {

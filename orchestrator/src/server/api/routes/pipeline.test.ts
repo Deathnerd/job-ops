@@ -518,6 +518,76 @@ describe.sequential("Pipeline API routes", () => {
     ).toBe(3);
   });
 
+  it("scopes run-by-preset lookups (id and name) to the active tenant and user", async () => {
+    const { runWithRequestContext } = await import(
+      "@server/infra/request-context"
+    );
+    const repo = await import("@server/repositories/pipeline-search-presets");
+    const config: PipelineSearchPresetConfig = {
+      searchTerms: ["platform engineer"],
+      sources: ["linkedin"],
+      country: "united states",
+      cityLocations: ["New York"],
+      workplaceTypes: ["remote"],
+      searchScope: "selected_only",
+      matchStrictness: "exact_only",
+      topN: 5,
+      minSuitabilityScore: 65,
+      runBudget: 150,
+      scoringInstructions: "",
+      automaticPresetId: "fast",
+    };
+
+    const created = await runWithRequestContext(
+      {
+        requestId: "preset-lookup-owner",
+        tenantId: "tenant_default",
+        userId: "user-a",
+      },
+      () => repo.createPipelineSearchPreset({ name: "Cron search", config }),
+    );
+
+    // The owner resolves the preset by id and by name.
+    const ownerById = await runWithRequestContext(
+      {
+        requestId: "preset-lookup-owner-id",
+        tenantId: "tenant_default",
+        userId: "user-a",
+      },
+      () => repo.getPipelineSearchPreset(created.id),
+    );
+    const ownerByName = await runWithRequestContext(
+      {
+        requestId: "preset-lookup-owner-name",
+        tenantId: "tenant_default",
+        userId: "user-a",
+      },
+      () => repo.getPipelineSearchPresetByName("Cron search"),
+    );
+    expect(ownerById?.id).toBe(created.id);
+    expect(ownerByName?.id).toBe(created.id);
+
+    // Another user in the same tenant sees nothing by id or name.
+    const otherUserById = await runWithRequestContext(
+      {
+        requestId: "preset-lookup-other-id",
+        tenantId: "tenant_default",
+        userId: "user-b",
+      },
+      () => repo.getPipelineSearchPreset(created.id),
+    );
+    const otherUserByName = await runWithRequestContext(
+      {
+        requestId: "preset-lookup-other-name",
+        tenantId: "tenant_default",
+        userId: "user-b",
+      },
+      () => repo.getPipelineSearchPresetByName("Cron search"),
+    );
+    expect(otherUserById).toBeNull();
+    expect(otherUserByName).toBeNull();
+  });
+
   it("returns pipeline run insights for a completed run", async () => {
     const { db, schema } = await import("@server/db");
 
@@ -961,6 +1031,90 @@ describe.sequential("Pipeline API routes", () => {
       }),
       expect.anything(),
     );
+  });
+
+  it("runs the pipeline from a saved search preset with inline overrides", async () => {
+    const { runPipeline } = await import("@server/pipeline/index");
+    const config: PipelineSearchPresetConfig = {
+      searchTerms: ["platform engineer"],
+      sources: ["gradcracker"],
+      country: "united kingdom",
+      cityLocations: ["London"],
+      locationMode: "cities",
+      proximity: null,
+      workplaceTypes: ["remote", "hybrid"],
+      searchScope: "selected_plus_remote_worldwide",
+      matchStrictness: "flexible",
+      topN: 10,
+      minSuitabilityScore: 55,
+      runBudget: 300,
+      scoringInstructions: "",
+      automaticPresetId: "custom",
+    };
+    const createRes = await fetch(`${baseUrl}/api/pipeline/search-presets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Daily platform", config }),
+    });
+    const createBody = await createRes.json();
+    expect(createRes.status).toBe(201);
+
+    const runRes = await fetch(`${baseUrl}/api/pipeline/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ presetName: "Daily platform", topN: 3 }),
+    });
+    const runBody = await runRes.json();
+    expect(runBody.ok).toBe(true);
+
+    expect(runPipeline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // Inline field wins over the preset's topN: 10.
+        topN: 3,
+        minSuitabilityScore: 55,
+        sources: ["gradcracker"],
+        runBudget: 300,
+        locationIntent: expect.objectContaining({
+          country: "united kingdom",
+          cityLocations: ["London"],
+          geoScope: "selected_plus_remote_worldwide",
+          matchStrictness: "flexible",
+        }),
+      }),
+      expect.anything(),
+    );
+
+    // Running from a preset stamps lastUsedAt (fire-and-forget, so poll).
+    await vi.waitFor(async () => {
+      const listRes = await fetch(`${baseUrl}/api/pipeline/search-presets`);
+      const listBody = await listRes.json();
+      const preset = listBody.data.searches.find(
+        (entry: { id: string }) => entry.id === createBody.data.id,
+      );
+      expect(preset.lastUsedAt).toEqual(expect.any(String));
+    });
+  });
+
+  it("returns not found for an unknown preset on /pipeline/run", async () => {
+    const res = await fetch(`${baseUrl}/api/pipeline/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ presetId: "missing-preset" }),
+    });
+    const body = await res.json();
+    expect(res.status).toBe(404);
+    expect(body.error.code).toBe("NOT_FOUND");
+  });
+
+  it("rejects presetId and presetName together on /pipeline/run", async () => {
+    const res = await fetch(`${baseUrl}/api/pipeline/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ presetId: "a", presetName: "b" }),
+    });
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error.code).toBe("INVALID_REQUEST");
   });
 
   it("rejects malformed Watchlist source IDs on /pipeline/run (#621)", async () => {
