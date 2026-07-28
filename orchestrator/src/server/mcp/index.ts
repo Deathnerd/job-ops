@@ -92,6 +92,11 @@ export function mountMcp(app: express.Express): void {
 
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: undefined,
+          // Respond to POSTs with plain JSON instead of SSE-framed streams.
+          // Spec-allowed for Streamable HTTP, and materially more compatible:
+          // simpler clients (Cloudflare MCP portal sync among them) parse the
+          // JSON body but choke on an event-stream response to a POST.
+          enableJsonResponse: true,
         });
         res.on("close", () => {
           void transport.close().catch(() => {});

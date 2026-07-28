@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `POST /mcp` responds with plain JSON (`enableJsonResponse`) instead of SSE-framed streams. Spec-allowed for Streamable HTTP and materially more compatible: simpler clients (Cloudflare MCP portal sync among them) parse a JSON body but choke on an event-stream response to a POST.
+
 - CI: GHCR workflow now builds on every push to `main` (`:main` + `:sha-<short>` tags) in addition to version tags; `:latest` moves only on tags; arm64 dropped (amd64-only deployment target).
 
 - Dev dependency: `@colbymchenry/codegraph` 1.4.1 (exact pin), backing the repo's committed `.mcp.json` codegraph MCP server. Local SQLite index, telemetry disabled machine-side.

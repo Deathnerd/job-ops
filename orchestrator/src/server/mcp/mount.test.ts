@@ -143,12 +143,9 @@ describe.sequential("MCP mount", () => {
     });
 
     expect(res.status).toBe(200);
-    // Stateless mode defaults to SSE streaming for the response; pull the
-    // JSON-RPC payload out of the "data: " line(s) of the event stream.
-    const raw = await res.text();
-    const dataLine = raw.split("\n").find((line) => line.startsWith("data: "));
-    expect(dataLine).toBeTruthy();
-    const body = JSON.parse(dataLine?.slice("data: ".length) ?? "");
+    // enableJsonResponse: POSTs get a plain JSON body, not an SSE stream.
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const body = await res.json();
     expect(body.result.serverInfo.name).toBe("jobops");
   });
 

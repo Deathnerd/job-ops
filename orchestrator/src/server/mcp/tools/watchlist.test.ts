@@ -13,13 +13,15 @@ const WATCHLIST_TOOL_NAMES = [
 ];
 
 async function readMcpJsonRpc(res: Response): Promise<any> {
-  // Stateless mode defaults to SSE streaming for the response; pull the
-  // JSON-RPC payload out of the "data: " line(s) of the event stream, same
-  // pattern as mount.test.ts / jobs.test.ts.
+  // enableJsonResponse means POSTs get a plain JSON body; keep the SSE
+  // "data: " parsing as a fallback for stream-framed responses.
   const raw = await res.text();
-  const dataLine = raw.split("\n").find((line) => line.startsWith("data: "));
-  expect(dataLine).toBeTruthy();
-  return JSON.parse(dataLine?.slice("data: ".length) ?? "");
+  if (res.headers.get("content-type")?.includes("text/event-stream")) {
+    const dataLine = raw.split("\n").find((line) => line.startsWith("data: "));
+    expect(dataLine).toBeTruthy();
+    return JSON.parse(dataLine?.slice("data: ".length) ?? "");
+  }
+  return JSON.parse(raw);
 }
 
 async function callMcp(
