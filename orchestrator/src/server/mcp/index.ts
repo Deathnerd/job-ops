@@ -57,6 +57,33 @@ export function mountMcp(app: express.Express): void {
     express.json({ limit: "4mb" }),
     async (req, res) => {
       try {
+        // The SDK transport rejects any Accept header that does not list BOTH
+        // application/json and text/event-stream literally -- including "*/*",
+        // which by HTTP semantics accepts everything. Real clients send laxer
+        // headers (Cloudflare MCP portal sync sends its own Accept; health
+        // probes send one type), so widen any COMPATIBLE Accept to the exact
+        // pair the SDK wants. Explicitly incompatible Accepts still 406.
+        const accept = req.headers.accept;
+        const acceptsAny = !accept || accept.includes("*/*");
+        if (
+          acceptsAny ||
+          accept.includes("application/json") ||
+          accept.includes("text/event-stream")
+        ) {
+          const widened = "application/json, text/event-stream";
+          req.headers.accept = widened;
+          // The SDK's Node transport rebuilds a web-standard Request from
+          // rawHeaders (via @hono/node-server), so the parsed headers object
+          // alone is ignored -- rawHeaders must be rewritten too.
+          let replaced = false;
+          for (let i = 0; i < req.rawHeaders.length; i += 2) {
+            if (req.rawHeaders[i].toLowerCase() === "accept") {
+              req.rawHeaders[i + 1] = widened;
+              replaced = true;
+            }
+          }
+          if (!replaced) req.rawHeaders.push("Accept", widened);
+        }
         const server = new McpServer({ name: "jobops", version: "1.0.0" });
         registerAllTools(server, {
           bearerKey: extractBearerKey(req),

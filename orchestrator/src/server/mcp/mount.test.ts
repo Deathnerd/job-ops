@@ -152,6 +152,60 @@ describe.sequential("MCP mount", () => {
     expect(body.result.serverInfo.name).toBe("jobops");
   });
 
+  it("normalizes lax-but-compatible Accept headers instead of 406ing (Cloudflare portal sync, health probes)", async () => {
+    ({ server, baseUrl, closeDb, tempDir } = await startServer({
+      env: {
+        JOBOPS_MCP_ENABLED: "true",
+        BASIC_AUTH_USER: "admin",
+        BASIC_AUTH_PASSWORD: "secret",
+        JWT_SECRET: "an-explicit-jwt-secret-with-at-least-32-chars",
+        JOBOPS_TEST_AUTH_BYPASS: "0",
+      },
+    }));
+
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "admin", password: "secret" }),
+    });
+    const loginBody = await loginRes.json();
+    const meRes = await fetch(`${baseUrl}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${loginBody.data.token}` },
+    });
+    const meBody = await meRes.json();
+    const { createApiKey } = await import("@server/repositories/api-keys");
+    const key = await createApiKey({
+      userId: meBody.data.user.id as string,
+      name: "accept-test",
+    });
+
+    for (const accept of ["*/*", "application/json", "text/event-stream"]) {
+      const res = await fetch(`${baseUrl}/mcp`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: accept,
+          Authorization: `Bearer ${key.plaintextKey}`,
+        },
+        body: initializeBody(),
+      });
+      expect(res.status, `Accept: ${accept}`).toBe(200);
+      await res.body?.cancel();
+    }
+
+    // An explicitly incompatible Accept still 406s per the SDK's validation.
+    const res = await fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/html",
+        Authorization: `Bearer ${key.plaintextKey}`,
+      },
+      body: initializeBody(),
+    });
+    expect(res.status).toBe(406);
+  });
+
   it("returns a 500 JSON-RPC error instead of crashing when the handler throws", async () => {
     // Force an internal throw inside the POST /mcp try block (registerAllTools)
     // to prove the async-rejection guard routes it to a proper JSON-RPC 500

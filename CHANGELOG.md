@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `POST /mcp` no longer 406s clients that send a compatible-but-lax `Accept` header (`*/*`, or only one of `application/json`/`text/event-stream`) — the header is widened to the exact pair the MCP SDK transport demands before handling. Fixes "unable to connect" from Cloudflare MCP portal sync and single-Accept health probes; explicitly incompatible `Accept` values still 406.
 - `GET /api/auth/me` resolves identity via the request context instead of re-verifying the JWT itself.
 - Auth guard fails closed (401) on resolver errors instead of surfacing a 500.
 
